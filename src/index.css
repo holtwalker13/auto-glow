@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Exo 2', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+    font-family: var(--font-sans);
+  }
+
+  body {
+    @apply min-h-dvh bg-black text-white;
+  }
+
+  ::selection {
+    @apply bg-cyan-500/40 text-white;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  .glow-divider {
+    @apply h-px w-12 bg-gradient-to-r from-transparent via-cyan-400 to-blue-600 opacity-90;
+  }
+
+  .shimmer-border {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .shimmer-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      120deg,
+      transparent 0%,
+      rgb(34 211 238 / 0.5) 35%,
+      rgb(59 130 246 / 0.6) 50%,
+      rgb(34 211 238 / 0.35) 65%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: shimmer-slide 4s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer-border::before {
+      animation: none;
+      background-position: 50% 50%;
+    }
+  }
+
+  .cta-gradient {
+    @apply bg-gradient-to-br from-cyan-400 via-sky-500 to-blue-800 text-white shadow-lg shadow-blue-900/40;
+  }
+
+  /** Cyan/blue atmosphere for the wizard body only — starts below the 150px header (see App header h). */
+  .form-ambient-layer {
+    position: fixed;
+    inset: 150px 0 0 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 85% 55% at 50% -15%, rgb(34 211 238 / 0.2), transparent 58%),
+      radial-gradient(ellipse 75% 50% at 100% 32%, rgb(59 130 246 / 0.16), transparent 52%),
+      radial-gradient(ellipse 55% 42% at 0% 58%, rgb(56 189 248 / 0.12), transparent 46%);
+  }
+}
+
+@keyframes shimmer-slide {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
