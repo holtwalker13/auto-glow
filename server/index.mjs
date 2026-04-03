@@ -99,6 +99,24 @@ function isSplitStaticHost() {
   return Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME)
 }
 
+/**
+ * Netlify redirects `/api/*` → `/.netlify/functions/api/:splat`, but the function often receives
+ * that internal path. Express only registers `/api/...`, so without this rewrite every API call 404s
+ * (and the edge may show 502).
+ */
+function rewriteNetlifyFunctionUrl(req, _res, next) {
+  const raw = req.url || '/'
+  const q = raw.indexOf('?')
+  const pathPart = q === -1 ? raw : raw.slice(0, q)
+  const qs = q === -1 ? '' : raw.slice(q)
+  const prefix = '/.netlify/functions/api'
+  if (pathPart === prefix || pathPart.startsWith(`${prefix}/`)) {
+    const tail = pathPart.length <= prefix.length ? '' : pathPart.slice(prefix.length)
+    req.url = `/api${tail}${qs}`
+  }
+  next()
+}
+
 function tabRange(a1) {
   const safe = CALENDAR_TAB.replace(/'/g, "''")
   return `'${safe}'!${a1}`
@@ -650,6 +668,7 @@ function requireAdmin(req, res, next) {
 function createApp() {
   const app = express()
   app.set('trust proxy', 1)
+  app.use(rewriteNetlifyFunctionUrl)
   app.use(cors({ origin: true, credentials: true }))
   app.use(express.json({ limit: '256kb' }))
   app.use(cookieParser(COOKIE_SECRET))
