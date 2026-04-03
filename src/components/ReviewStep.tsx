@@ -1,34 +1,40 @@
-import { getAddonById, getPackageById } from '../data/services'
+import { getAddonById, getPackageById, resolvePackagePrice } from '../data/services'
 import { computeAddonTotal, computeGrandTotal } from '../lib/buildPayload'
-import type { LocationMode, VehicleType } from '../types/request'
+import {
+  labelPreferredTime,
+  labelVehicleType,
+  type LocationMode,
+  type PreferredTimeSlot,
+  type VehicleType,
+} from '../types/request'
 
 export function ReviewStep({
   contact,
   vehicleType,
-  year,
-  makeModel,
-  color,
+  vehicleDescription,
   selectedPackageId,
   selectedAddonIds,
   locationMode,
   preferredDate,
+  preferredTimeSlot,
+  hasCeramicCoating,
   address,
   parkingNotes,
 }: {
   contact: { name: string; phone: string; email: string; notes: string }
   vehicleType: VehicleType | ''
-  year: string
-  makeModel: string
-  color: string
+  vehicleDescription: string
   selectedPackageId: string
   selectedAddonIds: string[]
   locationMode: LocationMode
   preferredDate: string
+  preferredTimeSlot: PreferredTimeSlot | ''
+  hasCeramicCoating: boolean
   address: string
   parkingNotes: string
 }) {
   const pkg = getPackageById(selectedPackageId)
-  const pkgPrice = pkg?.price ?? null
+  const pkgPrice = resolvePackagePrice(selectedPackageId, vehicleType)
   const addonTotal = computeAddonTotal(selectedAddonIds)
   const grand = computeGrandTotal(pkgPrice, addonTotal)
 
@@ -50,12 +56,8 @@ export function ReviewStep({
         <h3 className="font-display text-xs font-semibold uppercase tracking-wider text-cyan-400/90">
           Vehicle
         </h3>
-        <p className="mt-2 capitalize text-slate-300">{vehicleType || '—'}</p>
-        {[year, makeModel, color].some(Boolean) ? (
-          <p className="mt-1 text-slate-500">
-            {[year, makeModel, color].filter(Boolean).join(' · ')}
-          </p>
-        ) : null}
+        <p className="mt-2 text-slate-300">{labelVehicleType(vehicleType)}</p>
+        <p className="mt-2 text-slate-400">{vehicleDescription.trim() || '—'}</p>
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
@@ -94,6 +96,14 @@ export function ReviewStep({
         <p className="mt-2 text-slate-300">
           <span className="text-slate-500">Date: </span>
           {preferredDate || '—'}
+        </p>
+        <p className="mt-1 text-slate-300">
+          <span className="text-slate-500">Time: </span>
+          {hasCeramicCoating
+            ? 'All day (ceramic coating)'
+            : preferredTimeSlot
+              ? labelPreferredTime(preferredTimeSlot)
+              : '—'}
         </p>
         <p className="mt-1 text-slate-300">
           <span className="text-slate-500">Mode: </span>

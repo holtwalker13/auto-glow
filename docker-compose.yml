@@ -2,14 +2,10 @@ services:
   web:
     build: .
     ports:
-      - "5173:5173"
-    volumes:
-      - .:/app
-      - node_modules:/app/node_modules
+      - "8787:8787"
+    env_file: .env
+    # Host JSON key → fixed path inside container (.env’s file path won’t exist in the image)
     environment:
-      - CHOKIDAR_USEPOLLING=true
-    stdin_open: true
-    tty: true
-
-volumes:
-  node_modules:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-sa.json
+    volumes:
+      - ${GOOGLE_SA_FILE:-./jackson-auto-glow-7c712329ee4a.json}:/run/secrets/google-sa.json:ro

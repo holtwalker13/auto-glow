@@ -1,4 +1,5 @@
-import { getPackageById } from '../data/services'
+import { getPackageById, resolvePackagePrice } from '../data/services'
+import type { VehicleType } from '../types/request'
 import { computeAddonTotal, computeGrandTotal } from '../lib/buildPayload'
 
 function formatPrice(n: number | null): string {
@@ -9,12 +10,14 @@ function formatPrice(n: number | null): string {
 export function OrderSummaryBar({
   selectedPackageId,
   selectedAddonIds,
+  vehicleType,
 }: {
   selectedPackageId: string
   selectedAddonIds: string[]
+  vehicleType: VehicleType | ''
 }) {
   const pkg = getPackageById(selectedPackageId)
-  const pkgPrice = pkg?.price ?? null
+  const pkgPrice = resolvePackagePrice(selectedPackageId, vehicleType)
   const addonTotal = computeAddonTotal(selectedAddonIds)
   const grand = computeGrandTotal(pkgPrice, addonTotal)
 

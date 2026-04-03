@@ -1,3 +1,5 @@
+import type { VehicleType } from '../types/request'
+
 export type PackageSection = { title: string; items: string[] }
 
 export type ServicePackage = {
@@ -74,7 +76,8 @@ export const packages: ServicePackage[] = [
     id: 'full-detail',
     name: 'Full Detail',
     tagline: 'Experience the Shine Like Never Before',
-    price: 230,
+    /** Base / fallback; use `resolvePackagePrice` for amount by vehicle. */
+    price: 225,
     defaultSelected: true,
     sections: [
       {
@@ -215,4 +218,24 @@ export function getAddonById(id: string): Addon | undefined {
 
 export function getPackageById(id: string): ServicePackage | undefined {
   return packages.find((p) => p.id === id)
+}
+
+/** Full Detail is priced by vehicle class; other packages use catalog `price`. */
+export function resolvePackagePrice(
+  packageId: string,
+  vehicleType: VehicleType | '',
+): number | null {
+  const pkg = getPackageById(packageId)
+  if (!pkg) return null
+  if (packageId === 'full-detail') {
+    if (!vehicleType) return null
+    const byClass: Record<VehicleType, number> = {
+      car: 225,
+      'suv-compact': 225,
+      'suv-fullsize': 265,
+      truck: 295,
+    }
+    return byClass[vehicleType]
+  }
+  return pkg.price
 }

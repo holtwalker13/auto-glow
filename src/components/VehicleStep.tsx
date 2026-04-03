@@ -1,35 +1,32 @@
 import { motion } from 'framer-motion'
-import { Car, Truck, CarFront } from 'lucide-react'
+import { Car, Truck, CarFront, Bus } from 'lucide-react'
 import type { VehicleType } from '../types/request'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 
 const OPTIONS: { id: VehicleType; label: string; Icon: typeof Car }[] = [
   { id: 'car', label: 'Car', Icon: Car },
   { id: 'truck', label: 'Truck', Icon: Truck },
-  { id: 'suv', label: 'SUV', Icon: CarFront },
+  { id: 'suv-compact', label: 'Compact SUV', Icon: CarFront },
+  { id: 'suv-fullsize', label: 'Full-size SUV', Icon: Bus },
 ]
 
 export function VehicleStep({
   type,
   onTypeChange,
-  year,
-  makeModel,
-  color,
-  onDetailsChange,
+  description,
+  onDescriptionChange,
 }: {
   type: VehicleType | ''
   onTypeChange: (t: VehicleType) => void
-  year: string
-  makeModel: string
-  color: string
-  onDetailsChange: (field: 'year' | 'makeModel' | 'color', value: string) => void
+  description: string
+  onDescriptionChange: (value: string) => void
 }) {
   const reduce = usePrefersReducedMotion()
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-slate-400">Tap the vehicle that matches yours.</p>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {OPTIONS.map(({ id, label, Icon }) => {
           const selected = type === id
           return (
@@ -50,7 +47,9 @@ export function VehicleStep({
                 aria-hidden
               />
               <span
-                className={`text-sm font-medium ${selected ? 'text-white' : 'text-slate-300'}`}
+                className={`text-center text-xs font-medium leading-tight sm:text-sm ${
+                  selected ? 'text-white' : 'text-slate-300'
+                }`}
               >
                 {label}
               </span>
@@ -59,43 +58,19 @@ export function VehicleStep({
         })}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div>
-          <label className="mb-1.5 block text-sm text-slate-400" htmlFor="vyear">
-            Year <span className="text-slate-600">(optional)</span>
-          </label>
-          <input
-            id="vyear"
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-white outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/30"
-            placeholder="2022"
-            value={year}
-            onChange={(e) => onDetailsChange('year', e.target.value)}
-          />
-        </div>
-        <div className="sm:col-span-2">
-          <label className="mb-1.5 block text-sm text-slate-400" htmlFor="vmake">
-            Make & model <span className="text-slate-600">(optional)</span>
-          </label>
-          <input
-            id="vmake"
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-white outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/30"
-            placeholder="Tesla Model Y"
-            value={makeModel}
-            onChange={(e) => onDetailsChange('makeModel', e.target.value)}
-          />
-        </div>
-        <div className="sm:col-span-3">
-          <label className="mb-1.5 block text-sm text-slate-400" htmlFor="vcolor">
-            Color <span className="text-slate-600">(optional)</span>
-          </label>
-          <input
-            id="vcolor"
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-white outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/30"
-            placeholder="Midnight silver"
-            value={color}
-            onChange={(e) => onDetailsChange('color', e.target.value)}
-          />
-        </div>
+      <div>
+        <label className="mb-1.5 block text-sm font-medium text-slate-300" htmlFor="vehicle-desc">
+          Tell us about your vehicle <span className="text-red-400/90">*</span>
+        </label>
+        <textarea
+          id="vehicle-desc"
+          rows={3}
+          required
+          className="w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/30"
+          placeholder="Required — year, make & model, trim (e.g. 2022 Honda Civic Sport)"
+          value={description}
+          onChange={(e) => onDescriptionChange(e.target.value)}
+        />
       </div>
     </div>
   )

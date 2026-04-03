@@ -4,20 +4,31 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k \"vite\" \"PORT=8788 node server/index.mjs\"",
+    "dev:client": "vite",
+    "dev:server": "node server/index.mjs",
     "build": "tsc -b && vite build",
+    "start": "NODE_ENV=production node server/index.mjs",
+    "start:fresh": "npm run build && npm run start",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
     "framer-motion": "^12.38.0",
+    "googleapis": "^144.0.0",
     "lucide-react": "^1.6.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-router-dom": "^7.6.1",
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "@eslint/js": "^9.39.4",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",

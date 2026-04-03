@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+# Secrets
+.env
+.env.*
+!.env.example
+secrets/
+# Google Cloud service account keys (often downloaded to project root)
+jackson-auto-glow-*.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,5 +1,6 @@
 node_modules
 dist
 .git
+secrets
 *.md
 .DS_Store

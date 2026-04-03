@@ -1,9 +1,15 @@
 import {
   getAddonById,
   getPackageById,
+  resolvePackagePrice,
   type Addon,
 } from '../data/services'
-import type { RequestPayload, VehicleType, LocationMode } from '../types/request'
+import type {
+  RequestPayload,
+  VehicleType,
+  LocationMode,
+  PreferredTimeSlot,
+} from '../types/request'
 
 export function computeAddonTotal(selectedAddonIds: string[]): number {
   return selectedAddonIds.reduce((sum, id) => {
@@ -25,21 +31,23 @@ export function buildRequestPayload(input: {
   contact: { name: string; phone: string; email: string; notes?: string }
   vehicle: {
     type: VehicleType
-    year?: string
-    makeModel?: string
-    color?: string
+    description?: string
   }
   selectedPackageId: string
   selectedAddonIds: string[]
   dismissedPremiumIds: string[]
   locationMode: LocationMode
   preferredDate: string
+  preferredTimeSlot: PreferredTimeSlot
   address?: string
   parkingNotes?: string
 }): RequestPayload {
   const pkg = getPackageById(input.selectedPackageId)
   const packageLabel = pkg?.name ?? 'Package'
-  const packagePrice = pkg?.price ?? null
+  const packagePrice = resolvePackagePrice(
+    input.selectedPackageId,
+    input.vehicle.type,
+  )
   const addonsLineAmount = computeAddonTotal(input.selectedAddonIds)
   const grandTotal = computeGrandTotal(packagePrice, addonsLineAmount)
 
@@ -53,6 +61,7 @@ export function buildRequestPayload(input: {
     dismissedPremiumIds: [...input.dismissedPremiumIds],
     locationMode: input.locationMode,
     preferredDate: input.preferredDate,
+    preferredTimeSlot: input.preferredTimeSlot,
     address: input.address,
     parkingNotes: input.parkingNotes,
     totals: {

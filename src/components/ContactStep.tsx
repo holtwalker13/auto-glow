@@ -3,27 +3,15 @@ type Contact = { name: string; phone: string; email: string; notes: string }
 export function ContactStep({
   value,
   onChange,
-  userTestOptionalContact = false,
 }: {
   value: Contact
   onChange: (next: Contact) => void
-  /** When true, fields are not required (faster user testing). Turn off before launch. */
-  userTestOptionalContact?: boolean
 }) {
   return (
     <div className="space-y-5">
-      {userTestOptionalContact ? (
-        <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90">
-          User test mode: contact fields are optional so you can fly through the flow. Re-enable
-          validation before launch.
-        </p>
-      ) : null}
       <div>
         <label className="mb-1.5 block text-sm font-medium text-slate-300" htmlFor="name">
           Name
-          {userTestOptionalContact ? (
-            <span className="font-normal text-slate-500"> (optional for testing)</span>
-          ) : null}
         </label>
         <input
           id="name"
@@ -32,15 +20,12 @@ export function ContactStep({
           value={value.name}
           onChange={(e) => onChange({ ...value, name: e.target.value })}
           autoComplete="name"
-          required={!userTestOptionalContact}
+          required
         />
       </div>
       <div>
         <label className="mb-1.5 block text-sm font-medium text-slate-300" htmlFor="phone">
           Phone
-          {userTestOptionalContact ? (
-            <span className="font-normal text-slate-500"> (optional for testing)</span>
-          ) : null}
         </label>
         <input
           id="phone"
@@ -50,15 +35,12 @@ export function ContactStep({
           value={value.phone}
           onChange={(e) => onChange({ ...value, phone: e.target.value })}
           autoComplete="tel"
-          required={!userTestOptionalContact}
+          required
         />
       </div>
       <div>
         <label className="mb-1.5 block text-sm font-medium text-slate-300" htmlFor="email">
           Email
-          {userTestOptionalContact ? (
-            <span className="font-normal text-slate-500"> (optional for testing)</span>
-          ) : null}
         </label>
         <input
           id="email"
@@ -68,7 +50,7 @@ export function ContactStep({
           value={value.email}
           onChange={(e) => onChange({ ...value, email: e.target.value })}
           autoComplete="email"
-          required={!userTestOptionalContact}
+          required
         />
       </div>
       <div>

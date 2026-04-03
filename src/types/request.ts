@@ -1,6 +1,35 @@
-export type VehicleType = 'car' | 'truck' | 'suv'
+export type VehicleType = 'car' | 'truck' | 'suv-compact' | 'suv-fullsize'
 
 export type LocationMode = 'mobile' | 'shop'
+
+/** 24h values for API / payloads; UI shows AM/PM. */
+export type PreferredTimeSlot = '10:00' | '14:00' | '16:00'
+
+export const PREFERRED_TIME_OPTIONS: { value: PreferredTimeSlot; label: string }[] = [
+  { value: '10:00', label: '10 AM' },
+  { value: '14:00', label: '2 PM' },
+  { value: '16:00', label: '4 PM' },
+]
+
+export function labelVehicleType(t: VehicleType | ''): string {
+  if (!t) return '—'
+  switch (t) {
+    case 'car':
+      return 'Car'
+    case 'truck':
+      return 'Truck'
+    case 'suv-compact':
+      return 'Compact SUV'
+    case 'suv-fullsize':
+      return 'Full-size SUV'
+    default:
+      return t
+  }
+}
+
+export function labelPreferredTime(value: PreferredTimeSlot): string {
+  return PREFERRED_TIME_OPTIONS.find((o) => o.value === value)?.label ?? value
+}
 
 export interface RequestPayload {
   clientReferenceId: string
@@ -13,15 +42,15 @@ export interface RequestPayload {
   }
   vehicle: {
     type: VehicleType
-    year?: string
-    makeModel?: string
-    color?: string
+    /** Free text — encourage make & model in the form placeholder. */
+    description?: string
   }
   selectedPackageId: string
   selectedAddonIds: string[]
   dismissedPremiumIds: string[]
   locationMode: LocationMode
   preferredDate: string
+  preferredTimeSlot: PreferredTimeSlot
   address?: string
   parkingNotes?: string
   totals: {
