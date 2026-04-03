@@ -565,7 +565,7 @@ function requireAdmin(req, res, next) {
   return res.status(401).json({ error: 'Unauthorized' })
 }
 
-async function main() {
+function createApp() {
   const app = express()
   app.set('trust proxy', 1)
   app.use(cors({ origin: true, credentials: true }))
@@ -918,7 +918,10 @@ async function main() {
     }
   })
 
-  const distDir = path.join(__dirname, '..', 'dist')
+  const distDir =
+    [path.join(__dirname, '..', 'dist'), path.join(process.cwd(), 'dist')].find((p) =>
+      fs.existsSync(p),
+    ) || path.join(__dirname, '..', 'dist')
 
   function cacheHeadersForStaticFile(res, filepath) {
     const normalized = filepath.replace(/\\/g, '/')
@@ -945,15 +948,30 @@ async function main() {
     })
   }
 
+  return app
+}
+
+function main() {
+  const app = createApp()
   app.listen(PORT, () => {
     console.log(`[auto-glow] API http://localhost:${PORT}`)
+    const distDir =
+      [path.join(__dirname, '..', 'dist'), path.join(process.cwd(), 'dist')].find((p) =>
+        fs.existsSync(p),
+      ) || path.join(__dirname, '..', 'dist')
     if (process.env.NODE_ENV === 'production' && fs.existsSync(distDir)) {
       console.log('[auto-glow] Serving static from dist/')
     }
   })
 }
 
-main().catch((e) => {
-  console.error(e)
-  process.exit(1)
-})
+export { createApp }
+
+if (!process.env.VERCEL) {
+  try {
+    main()
+  } catch (e) {
+    console.error(e)
+    process.exit(1)
+  }
+}
