@@ -7,8 +7,12 @@
 
 [functions]
   node_bundler = "esbuild"
-  # Large Google client — avoid fragile inlining
-  external_node_modules = ["googleapis"]
+  # Bundle google libs from node_modules (avoids esbuild breaking dynamic requires)
+  external_node_modules = ["googleapis", "google-auth-library", "gaxios"]
+
+# Optional on Pro+: longer cold starts for Sheets (free tier is ~10s max — trim env / retry if 502)
+# [functions.api]
+#   timeout = 26
 
 # Send /api to the Lambda (Express)
 [[redirects]]

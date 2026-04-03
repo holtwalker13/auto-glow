@@ -273,42 +273,61 @@ function credentialsFromEmailAndPem() {
   }
 }
 
+function isFullServiceAccountJson(obj) {
+  return Boolean(
+    obj &&
+      typeof obj === 'object' &&
+      typeof obj.client_email === 'string' &&
+      obj.client_email.includes('@') &&
+      typeof obj.private_key === 'string' &&
+      obj.private_key.includes('PRIVATE KEY'),
+  )
+}
+
+function tryParseJsonCredentials(raw) {
+  try {
+    const o = JSON.parse(raw)
+    return isFullServiceAccountJson(o) ? o : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Netlify: prefer email + PEM when both are set (avoids a stale/broken JSON_BASE64 blocking auth).
+ * Invalid base64/JSON falls through instead of returning null for the whole loader.
+ */
 function loadServiceAccountCredentials() {
+  const fromPem = credentialsFromEmailAndPem()
+  if (fromPem) return fromPem
+
   const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64?.trim()
   if (b64) {
     try {
       const raw = Buffer.from(b64, 'base64').toString('utf8')
-      return JSON.parse(raw)
+      const parsed = tryParseJsonCredentials(raw)
+      if (parsed) return parsed
     } catch {
-      return null
+      /* fall through */
     }
   }
   const inline = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim()
   if (inline) {
-    try {
-      return JSON.parse(inline)
-    } catch {
-      return null
-    }
+    const parsed = tryParseJsonCredentials(inline)
+    if (parsed) return parsed
   }
-  const fromPem = credentialsFromEmailAndPem()
-  if (fromPem) return fromPem
 
   const gac = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim()
   if (gac) {
-    // Hosts like Vercel often paste the full service-account JSON here; historically this was a file path only.
     if (gac.startsWith('{')) {
+      const parsed = tryParseJsonCredentials(gac)
+      if (parsed) return parsed
+    } else if (fs.existsSync(gac)) {
       try {
-        return JSON.parse(gac)
+        const parsed = tryParseJsonCredentials(fs.readFileSync(gac, 'utf8'))
+        if (parsed) return parsed
       } catch {
-        return null
-      }
-    }
-    if (fs.existsSync(gac)) {
-      try {
-        return JSON.parse(fs.readFileSync(gac, 'utf8'))
-      } catch {
-        return null
+        /* fall through */
       }
     }
   }
