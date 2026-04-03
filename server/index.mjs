@@ -10,7 +10,6 @@ import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import dotenv from 'dotenv'
-import { google } from 'googleapis'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.join(__dirname, '..', '.env') })
@@ -87,7 +86,7 @@ const PACKAGE_NAMES = {
   'full-detail': 'Full Detail',
 }
 const COOKIE_SECRET = process.env.SESSION_COOKIE_SECRET || 'change-me-set-SESSION_COOKIE_SECRET'
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ''
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || '').trim()
 const PORT = Number(process.env.PORT || 8787)
 const CERAMIC_ADDON_ID = 'addon-ceramic-3yr'
 /** When column A has no year (e.g. "Wednesday, April 1"), assume this year. Booking sheet is 2026. */
@@ -350,8 +349,18 @@ function assertSheetsEnv() {
   }
 }
 
+/** Lazy-load googleapis so /api/admin/* cold starts stay under Netlify’s ~10s budget. */
+let googleApisModule = null
+async function loadGoogle() {
+  if (!googleApisModule) {
+    googleApisModule = await import('googleapis')
+  }
+  return googleApisModule.google
+}
+
 async function getSheets() {
   assertSheetsEnv()
+  const google = await loadGoogle()
   const credentials = loadServiceAccountCredentials()
   const auth = new google.auth.GoogleAuth({
     credentials,
@@ -859,7 +868,7 @@ function createApp() {
     if (!ADMIN_PASSWORD) {
       return res.status(503).json({ error: 'ADMIN_PASSWORD not set' })
     }
-    const pwd = req.body?.password ?? ''
+    const pwd = String(req.body?.password ?? '').trim()
     if (!timingSafePassword(ADMIN_PASSWORD, pwd)) {
       return res.status(401).json({ error: 'Invalid password' })
     }
