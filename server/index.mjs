@@ -227,6 +227,52 @@ function letter(colZeroBased) {
   return String.fromCharCode(65 + colZeroBased)
 }
 
+/** PEM from Netlify/UI: literal \n, or multiline, or one long line of base64 between BEGIN/END. */
+function normalizePemPrivateKey(raw) {
+  let k = String(raw ?? '').trim()
+  if (!k) return ''
+  k = k.replace(/\\n/g, '\n').replace(/\\r\n?/g, '\n')
+  if (!k.includes('\n') && /BEGIN [A-Z ]*PRIVATE KEY/.test(k)) {
+    const begin = k.match(/-----BEGIN [^-]+-----/)
+    const end = k.match(/-----END [^-]+-----/)
+    if (begin && end) {
+      const bi = k.indexOf(begin[0])
+      const ei = k.indexOf(end[0])
+      if (ei > bi) {
+        const body = k.slice(bi + begin[0].length, ei).replace(/\s+/g, '')
+        const lines = body.match(/.{1,64}/g) ?? []
+        k = `${begin[0]}\n${lines.join('\n')}\n${end[0]}`
+      }
+    }
+  }
+  return k.trim()
+}
+
+function credentialsFromEmailAndPem() {
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim()
+  if (!email) return null
+  let pem =
+    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.trim() ||
+    process.env.GOOGLE_PRIVATE_KEY?.trim() ||
+    ''
+  const pemB64 = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_BASE64?.trim()
+  if (!pem && pemB64) {
+    try {
+      pem = Buffer.from(pemB64, 'base64').toString('utf8').trim()
+    } catch {
+      return null
+    }
+  }
+  if (!pem) return null
+  const private_key = normalizePemPrivateKey(pem)
+  if (!private_key.includes('PRIVATE KEY')) return null
+  return {
+    type: 'service_account',
+    client_email: email,
+    private_key,
+  }
+}
+
 function loadServiceAccountCredentials() {
   const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64?.trim()
   if (b64) {
@@ -245,6 +291,9 @@ function loadServiceAccountCredentials() {
       return null
     }
   }
+  const fromPem = credentialsFromEmailAndPem()
+  if (fromPem) return fromPem
+
   const gac = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim()
   if (gac) {
     // Hosts like Vercel often paste the full service-account JSON here; historically this was a file path only.
@@ -275,7 +324,7 @@ function assertSheetsEnv() {
   const creds = loadServiceAccountCredentials()
   if (!creds?.client_email || !creds?.private_key) {
     const err = new Error(
-      'Google credentials missing or invalid. Set GOOGLE_SERVICE_ACCOUNT_JSON (one-line JSON), GOOGLE_SERVICE_ACCOUNT_JSON_BASE64, or GOOGLE_APPLICATION_CREDENTIALS to a key file path.',
+      'Google credentials missing or invalid. Set GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY (PEM), or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 / GOOGLE_SERVICE_ACCOUNT_JSON, or GOOGLE_APPLICATION_CREDENTIALS (path or JSON).',
     )
     err.status = 503
     throw err
