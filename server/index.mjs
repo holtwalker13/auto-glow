@@ -95,6 +95,11 @@ const CALENDAR_YEAR = parseInt(process.env.SHEET_CALENDAR_YEAR || '2026', 10)
 
 const SLOTS = ['10:00', '14:00', '16:00']
 
+/** Vercel or Netlify (AWS Lambda) — static site is served separately; do not listen() or bundle dist in the function. */
+function isSplitStaticHost() {
+  return Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME)
+}
+
 function tabRange(a1) {
   const safe = CALENDAR_TAB.replace(/'/g, "''")
   return `'${safe}'!${a1}`
@@ -934,11 +939,9 @@ function createApp() {
     }
   }
 
-  // Vercel serves dist/ as static; this process only receives /api/* — skip bundling dist into the lambda.
+  // Vercel/Netlify serve dist/ from CDN; this process only handles /api/* in the function.
   const serveStatic =
-    process.env.NODE_ENV === 'production' &&
-    fs.existsSync(distDir) &&
-    !process.env.VERCEL
+    process.env.NODE_ENV === 'production' && fs.existsSync(distDir) && !isSplitStaticHost()
 
   if (serveStatic) {
     app.use(
@@ -973,7 +976,7 @@ function main() {
 
 export { createApp }
 
-if (!process.env.VERCEL) {
+if (!isSplitStaticHost()) {
   try {
     main()
   } catch (e) {

@@ -1,0 +1,29 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  node_bundler = "esbuild"
+  # Large Google client — avoid fragile inlining
+  external_node_modules = ["googleapis"]
+
+# Send /api to the Lambda (Express)
+[[redirects]]
+  from = "/api"
+  to = "/.netlify/functions/api"
+  status = 200
+
+# Send /api/* to the Lambda (Express keeps routes like /api/calendar)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# SPA (React Router): try static files first via implicit rules, then fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
