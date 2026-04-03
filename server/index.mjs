@@ -240,12 +240,22 @@ function loadServiceAccountCredentials() {
       return null
     }
   }
-  const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim()
-  if (keyFile && fs.existsSync(keyFile)) {
-    try {
-      return JSON.parse(fs.readFileSync(keyFile, 'utf8'))
-    } catch {
-      return null
+  const gac = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim()
+  if (gac) {
+    // Hosts like Vercel often paste the full service-account JSON here; historically this was a file path only.
+    if (gac.startsWith('{')) {
+      try {
+        return JSON.parse(gac)
+      } catch {
+        return null
+      }
+    }
+    if (fs.existsSync(gac)) {
+      try {
+        return JSON.parse(fs.readFileSync(gac, 'utf8'))
+      } catch {
+        return null
+      }
     }
   }
   return null
