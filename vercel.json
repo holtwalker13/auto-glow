@@ -2,10 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "installCommand": "npm install",
-  "functions": {
-    "api/index.mjs": {
-      "includeFiles": "dist/**"
-    }
-  },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "handle": "filesystem" },
+    { "source": "/((?!api).*)", "destination": "/index.html" }
+  ]
 }

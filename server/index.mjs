@@ -934,7 +934,13 @@ function createApp() {
     }
   }
 
-  if (process.env.NODE_ENV === 'production' && fs.existsSync(distDir)) {
+  // Vercel serves dist/ as static; this process only receives /api/* — skip bundling dist into the lambda.
+  const serveStatic =
+    process.env.NODE_ENV === 'production' &&
+    fs.existsSync(distDir) &&
+    !process.env.VERCEL
+
+  if (serveStatic) {
     app.use(
       express.static(distDir, {
         setHeaders: (res, filepath) => cacheHeadersForStaticFile(res, filepath),
