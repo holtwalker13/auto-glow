@@ -11,8 +11,28 @@ import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import dotenv from 'dotenv'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-dotenv.config({ path: path.join(__dirname, '..', '.env') })
+/**
+ * Netlify bundles `server/index.mjs` into a single `api.js`; `import.meta.url` can be missing,
+ * which makes `fileURLToPath(undefined)` throw before any route runs (502).
+ */
+function resolveServerDirname() {
+  try {
+    const u = import.meta?.url
+    if (typeof u === 'string' && u.length > 0) {
+      return path.dirname(fileURLToPath(u))
+    }
+  } catch {
+    /* bundled without a usable import.meta.url */
+  }
+  return process.cwd()
+}
+
+const __dirname = resolveServerDirname()
+
+// Lambda / Vercel: env comes from the host; no .env file on disk.
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME && !process.env.VERCEL) {
+  dotenv.config({ path: path.join(__dirname, '..', '.env') })
+}
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
 const CALENDAR_TAB = (process.env.GOOGLE_SHEETS_CALENDAR_TAB || 'Booking Calendar').trim()
