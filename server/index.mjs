@@ -716,7 +716,17 @@ function createApp() {
   app.use(cookieParser(COOKIE_SECRET))
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true })
+    res.json({
+      ok: true,
+      runtime: process.env.AWS_LAMBDA_FUNCTION_NAME ? 'lambda' : 'node',
+      /** Booleans only — use to verify Netlify injected env into the function (no secret values). */
+      config: {
+        adminPassword: Boolean((process.env.ADMIN_PASSWORD || '').trim()),
+        sessionSecret: Boolean((process.env.SESSION_COOKIE_SECRET || '').trim()),
+        sheetId: Boolean((process.env.GOOGLE_SHEETS_SPREADSHEET_ID || '').trim()),
+        googleCredentials: Boolean(loadServiceAccountCredentials()),
+      },
+    })
   })
 
   app.get('/api/availability', async (req, res) => {
