@@ -99,22 +99,64 @@ function isSplitStaticHost() {
   return Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME)
 }
 
+/** First path segment for routes this app exposes under `/api/...` (when Lambda gets a stripped path). */
+const NETLIFY_API_ROOT_SEGMENTS = new Set([
+  'admin',
+  'bookings',
+  'calendar',
+  'availability',
+  'health',
+])
+
 /**
- * Netlify redirects `/api/*` → `/.netlify/functions/api/:splat`, but the function often receives
- * that internal path. Express only registers `/api/...`, so without this rewrite every API call 404s
- * (and the edge may show 502).
+ * Netlify rewrites `/api/*` → `/.netlify/functions/api/:splat`. The Lambda event often uses
+ * `/.netlify/functions/api/...` or a splat-only path like `/admin/me`. Express only mounts `/api/...`.
+ *
+ * serverless-http's clean-up prefers `event.requestPath` over `rawPath` / `path`, so we normalize
+ * in the Netlify handler (see normalizeNetlifyLambdaEvent) and mirror here for local parity.
  */
+function normalizeApiPathnameForNetlify(pathname) {
+  let p = pathname || '/'
+  if (p[0] !== '/') p = `/${p}`
+  const prefix = '/.netlify/functions/api'
+  if (p === prefix || p.startsWith(`${prefix}/`)) {
+    const tail = p.length <= prefix.length ? '' : p.slice(prefix.length)
+    p = `/api${tail}`
+  }
+  if (process.env.AWS_LAMBDA_FUNCTION_NAME && !process.env.VERCEL && !p.startsWith('/api')) {
+    const slash = p.indexOf('/', 1)
+    const first = slash === -1 ? p.slice(1) : p.slice(1, slash)
+    if (NETLIFY_API_ROOT_SEGMENTS.has(first)) {
+      p = `/api${p}`
+    }
+  }
+  return p
+}
+
 function rewriteNetlifyFunctionUrl(req, _res, next) {
   const raw = req.url || '/'
   const q = raw.indexOf('?')
   const pathPart = q === -1 ? raw : raw.slice(0, q)
   const qs = q === -1 ? '' : raw.slice(q)
-  const prefix = '/.netlify/functions/api'
-  if (pathPart === prefix || pathPart.startsWith(`${prefix}/`)) {
-    const tail = pathPart.length <= prefix.length ? '' : pathPart.slice(prefix.length)
-    req.url = `/api${tail}${qs}`
-  }
+  req.url = normalizeApiPathnameForNetlify(pathPart) + qs
   next()
+}
+
+/**
+ * Mutate the Lambda event before serverless-http (Netlify may set `requestPath`, which wins over
+ * `rawPath` in clean-up-event.js).
+ */
+export function normalizeNetlifyLambdaEvent(event) {
+  if (!event || process.env.VERCEL) return
+  const v2 = event.version === '2.0'
+  const cur = String(v2 ? event.requestPath || event.rawPath || '/' : event.requestPath || event.path || '/')
+  const q = cur.indexOf('?')
+  const pathOnly = q === -1 ? cur : cur.slice(0, q)
+  const normalized = normalizeApiPathnameForNetlify(pathOnly)
+  if (pathOnly === normalized) return
+  event.requestPath = normalized
+  if (v2) event.rawPath = normalized
+  else event.path = normalized
 }
 
 function tabRange(a1) {

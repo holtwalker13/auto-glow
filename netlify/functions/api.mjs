@@ -1,11 +1,12 @@
 import serverless from 'serverless-http'
-import { createApp } from '../../server/index.mjs'
+import { createApp, normalizeNetlifyLambdaEvent } from '../../server/index.mjs'
 
 const app = createApp()
 const run = serverless(app)
 
 export const handler = async (event, context) => {
   try {
+    normalizeNetlifyLambdaEvent(event)
     return await run(event, context)
   } catch (err) {
     console.error('[netlify api]', err)
