@@ -6,10 +6,11 @@ import {
   parseCalendarBookingLabel,
 } from '../lib/adminConfirmationMessage'
 import { buildSmsMessagesUrl } from '../lib/smsHref'
-import { getAddonById } from '../data/services'
+import { getAddonById, getPackageById, resolvePackagePrice } from '../data/services'
 import {
   PREFERRED_TIME_OPTIONS,
   labelPreferredTime,
+  vehicleTypeFromSheetLabel,
   type PreferredTimeSlot,
 } from '../types/request'
 
@@ -25,6 +26,8 @@ type QueuePendingItem = {
   fullDayCeramic: string
   packageId: string
   packageLabel: string
+  packagePrice?: number | null
+  addonsLineTotal?: number
   vehicleDescription: string
   vehicleTypeLabel: string
   selectedAddonIds: string[]
@@ -45,6 +48,18 @@ type Row = {
 }
 
 const SLOT_KEYS: PreferredTimeSlot[] = ['10:00', '14:00', '16:00']
+
+function queuePackageDisplayName(q: QueuePendingItem): string {
+  const fromApi = (q.packageLabel || '').trim()
+  if (fromApi) return fromApi
+  return getPackageById(q.packageId)?.name || q.packageId || '—'
+}
+
+function queueResolvedPackagePrice(q: QueuePendingItem): number | null {
+  if (q.packagePrice != null && Number.isFinite(q.packagePrice)) return q.packagePrice
+  const vt = vehicleTypeFromSheetLabel(q.vehicleTypeLabel)
+  return resolvePackagePrice(q.packageId, vt)
+}
 
 type SelectedBooking = {
   row: Row
@@ -674,12 +689,22 @@ export function AdminDashboard() {
                   >
                     <div className="min-w-0">
                       <p className="truncate font-medium text-white">{q.name || 'Customer'}</p>
-                      <p className="mt-0.5 text-xs text-slate-400">
+                      <p className="mt-0.5 truncate text-xs text-slate-400">
                         <span className="font-mono text-slate-500">{q.preferredDate}</span>
                         <span className="mx-1.5 text-slate-600">·</span>
                         {q.fullDayCeramic?.toLowerCase() === 'yes'
                           ? 'Full day (ceramic)'
                           : q.timeSummary || 'Time TBD'}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">
+                        {queuePackageDisplayName(q)}
+                        {(() => {
+                          const p = queueResolvedPackagePrice(q)
+                          return p != null ? ` · $${p}` : ''
+                        })()}
+                        {q.selectedAddonIds.length > 0
+                          ? ` · +${q.selectedAddonIds.length} add-on${q.selectedAddonIds.length === 1 ? '' : 's'}`
+                          : ''}
                       </p>
                     </div>
                     <span className="shrink-0 rounded-full bg-cyan-950/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-200/85">
@@ -1082,7 +1107,20 @@ export function AdminDashboard() {
                   <div>
                     <dt className="font-medium uppercase tracking-wider text-slate-500">Package</dt>
                     <dd className="mt-0.5 text-slate-200">
-                      {selectedQueueItem.packageLabel || selectedQueueItem.packageId}
+                      <span className="font-medium text-white">
+                        {queuePackageDisplayName(selectedQueueItem)}
+                      </span>
+                      {(() => {
+                        const p = queueResolvedPackagePrice(selectedQueueItem)
+                        return p != null ? (
+                          <span className="text-cyan-300"> — ${p}</span>
+                        ) : null
+                      })()}
+                      {selectedQueueItem.packageId ? (
+                        <span className="mt-1 block font-mono text-[10px] text-slate-600">
+                          id: {selectedQueueItem.packageId}
+                        </span>
+                      ) : null}
                     </dd>
                   </div>
                   <div>
@@ -1114,13 +1152,33 @@ export function AdminDashboard() {
                     </div>
                   ) : null}
                   <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Add-ons</dt>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">
+                      Services & add-ons
+                    </dt>
                     <dd className="mt-0.5 text-slate-300">
-                      {selectedQueueItem.selectedAddonIds.length === 0
-                        ? 'None'
-                        : selectedQueueItem.selectedAddonIds
-                            .map((id) => getAddonById(id)?.name ?? id)
-                            .join(' · ')}
+                      {selectedQueueItem.selectedAddonIds.length === 0 ? (
+                        <p className="text-slate-500">No add-ons — base package only.</p>
+                      ) : (
+                        <ul className="space-y-1.5 border-l border-cyan-500/20 pl-3">
+                          {selectedQueueItem.selectedAddonIds.map((id) => {
+                            const a = getAddonById(id)
+                            return (
+                              <li key={id} className="flex justify-between gap-3 text-sm">
+                                <span className="text-slate-200">{a?.name ?? id}</span>
+                                <span className="shrink-0 font-medium text-cyan-200/90">
+                                  {a ? `+$${a.price}` : '—'}
+                                </span>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
+                      {selectedQueueItem.addonsLineTotal != null &&
+                      selectedQueueItem.addonsLineTotal > 0 ? (
+                        <p className="mt-2 text-[11px] text-slate-500">
+                          Add-ons subtotal: ${selectedQueueItem.addonsLineTotal}
+                        </p>
+                      ) : null}
                     </dd>
                   </div>
                   {selectedQueueItem.grandTotal != null ? (

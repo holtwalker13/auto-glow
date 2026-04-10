@@ -1,13 +1,14 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { X } from 'lucide-react'
 import {
+  getAddonById,
   getSubAddonsForPackage,
   packageUsesTwoPhaseSubAddons,
   subAddonsExterior,
   subAddonsInterior,
 } from '../data/services'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export function SubAddonsModal({
   open,
@@ -27,6 +28,10 @@ export function SubAddonsModal({
   const reduce = usePrefersReducedMotion()
   const [phase, setPhase] = useState(0)
   const twoPhase = packageUsesTwoPhaseSubAddons(packageId)
+
+  useEffect(() => {
+    if (open) setPhase(0)
+  }, [open])
   const allForPkg = getSubAddonsForPackage(packageId)
 
   if (!open || allForPkg.length === 0) return null
@@ -145,6 +150,9 @@ export function SubAddonsModal({
             >
               {currentList.map((a) => {
                 const checked = selectedAddonIds.includes(a.id)
+                const live = getAddonById(a.id)
+                const label = live?.name ?? a.name
+                const price = live?.price ?? a.price
                 return (
                   <li key={a.id}>
                     <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 transition hover:border-cyan-500/30 hover:bg-white/[0.05] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-cyan-400/50">
@@ -155,8 +163,8 @@ export function SubAddonsModal({
                         className="mt-1 h-4 w-4 shrink-0 rounded border-white/20 bg-black text-cyan-500 focus:ring-cyan-400/50"
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-white">{a.name}</span>
-                        <span className="text-xs text-cyan-300/90">+${a.price}</span>
+                        <span className="block text-sm font-medium text-white">{label}</span>
+                        <span className="text-xs text-cyan-300/90">+${price}</span>
                       </span>
                     </label>
                   </li>

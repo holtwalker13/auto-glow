@@ -56,6 +56,8 @@ const SUBMISSIONS_HEADER_ROWS = Math.max(0, parseInt(process.env.GOOGLE_SHEETS_S
 const REQUEST_QUEUE_TAB = (process.env.GOOGLE_SHEETS_REQUEST_QUEUE_TAB || 'Requests Queue').trim()
 /** Queue tab always has a single header row (A1:AB1), independent of Submitted Requests header count. */
 const REQUEST_QUEUE_HEADER_ROWS = 1
+/** Live package + add-on prices (same spreadsheet). Keep in sync with `FALLBACK_PACKAGE_MATRIX` in src/lib/pricingConstants.ts */
+const PRICING_TAB = (process.env.GOOGLE_SHEETS_PRICING_TAB || 'Pricing').trim()
 
 /** Column index (0-based) for admin phone lookup */
 const SUB_COL_REF = 1
@@ -137,6 +139,209 @@ const ADDON_META = {
   'addon-sub-pet-hair': { name: 'Pet hair removal', price: 55 },
 }
 
+function buildBuiltinAddonMapFromMeta() {
+  const o = {}
+  for (const [id, v] of Object.entries(ADDON_META)) {
+    o[id] = { name: v.name, price: v.price }
+  }
+  return o
+}
+
+/** Fallback when the Pricing tab is missing or unreadable. Mirrors src/lib/pricingConstants.ts */
+const BUILTIN_PACKAGE_MATRIX = {
+  'interior-detail': {
+    car: 120,
+    truck: 120,
+    minivan: 120,
+    'suv-compact': 120,
+    'suv-fullsize': 120,
+  },
+  'exterior-detail': {
+    car: 200,
+    truck: 200,
+    minivan: 200,
+    'suv-compact': 200,
+    'suv-fullsize': 200,
+  },
+  'full-detail': {
+    car: 225,
+    truck: 295,
+    minivan: 295,
+    'suv-compact': 225,
+    'suv-fullsize': 265,
+  },
+  'full-everything': {
+    car: 700,
+    truck: 700,
+    minivan: 700,
+    'suv-compact': 700,
+    'suv-fullsize': 700,
+  },
+}
+
+let pricingCatalogState = { snapshot: null, loadedAt: 0, ttlMs: 60_000 }
+
+function getBuiltinPricingSnapshot() {
+  return {
+    packages: { ...BUILTIN_PACKAGE_MATRIX },
+    addons: buildBuiltinAddonMapFromMeta(),
+  }
+}
+
+function getActivePricingCatalog() {
+  if (pricingCatalogState.snapshot) return pricingCatalogState.snapshot
+  return getBuiltinPricingSnapshot()
+}
+
+function normalizePricingVehicleHeader(cell) {
+  const k = String(cell ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_')
+    .replace(/\s+/g, '_')
+  const map = {
+    car: 'car',
+    truck: 'truck',
+    minivan: 'minivan',
+    compact_suv: 'suv-compact',
+    small_suv: 'suv-compact',
+    smal_suv: 'suv-compact',
+    'suv-compact': 'suv-compact',
+    suv_compact: 'suv-compact',
+    full_suv: 'suv-fullsize',
+    fullsize_suv: 'suv-fullsize',
+    full_size_suv: 'suv-fullsize',
+    'suv-fullsize': 'suv-fullsize',
+    suv_fullsize: 'suv-fullsize',
+  }
+  return map[k] || null
+}
+
+function parsePricingNumber(raw) {
+  if (raw == null || raw === '') return null
+  if (typeof raw === 'number' && Number.isFinite(raw)) return Math.round(raw)
+  const s = String(raw).replace(/[$,]/g, '').trim()
+  const n = parseFloat(s)
+  return Number.isFinite(n) ? Math.round(n) : null
+}
+
+function parsePricingSheetRows(values) {
+  const packages = {}
+  const addons = {}
+  if (!values?.length) return { packages, addons }
+
+  let i = 0
+  while (i < values.length && !String(values[i]?.[0] ?? '').trim()) i++
+
+  if (String(values[i]?.[0] ?? '').trim().toUpperCase() === 'PACKAGES') i++
+
+  const header = values[i] || []
+  i++
+  const colToVehicle = {}
+  for (let c = 1; c < header.length; c++) {
+    const vk = normalizePricingVehicleHeader(header[c])
+    if (vk) colToVehicle[c] = vk
+  }
+
+  while (i < values.length) {
+    const pid = String(values[i]?.[0] ?? '').trim()
+    if (!pid) {
+      i++
+      continue
+    }
+    if (pid.toUpperCase() === 'ADDONS') {
+      i++
+      break
+    }
+    const row = {}
+    for (const [cs, vk] of Object.entries(colToVehicle)) {
+      const c = Number(cs)
+      const num = parsePricingNumber(values[i][c])
+      if (num != null) row[vk] = num
+    }
+    if (Object.keys(row).length > 0) packages[pid] = row
+    i++
+  }
+
+  while (i < values.length && !String(values[i]?.[0] ?? '').trim()) i++
+
+  if (String(values[i]?.[0] ?? '').trim().toLowerCase() === 'addon_id') i++
+
+  while (i < values.length) {
+    const aid = String(values[i]?.[0] ?? '').trim()
+    if (!aid) {
+      i++
+      continue
+    }
+    if (aid.toLowerCase() === 'addon_id') {
+      i++
+      continue
+    }
+    const name = String(values[i][1] ?? '').trim()
+    const price = parsePricingNumber(values[i][2])
+    if (price != null) {
+      const meta = ADDON_META[aid]
+      addons[aid] = { name: name || meta?.name || aid, price }
+    }
+    i++
+  }
+
+  return { packages, addons }
+}
+
+async function readPricingTabValues(sheets) {
+  const safe = PRICING_TAB.replace(/'/g, "''")
+  const r = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${safe}'!A1:Z300`,
+  })
+  return r.data.values || []
+}
+
+async function refreshPricingCatalog(sheets) {
+  const now = Date.now()
+  if (
+    pricingCatalogState.snapshot &&
+    now - pricingCatalogState.loadedAt < pricingCatalogState.ttlMs
+  ) {
+    return pricingCatalogState.snapshot
+  }
+  try {
+    const values = await readPricingTabValues(sheets)
+    const parsed = parsePricingSheetRows(values)
+    const mergedPkgs = { ...BUILTIN_PACKAGE_MATRIX, ...parsed.packages }
+    const mergedAddons = { ...buildBuiltinAddonMapFromMeta(), ...parsed.addons }
+    pricingCatalogState.snapshot = { packages: mergedPkgs, addons: mergedAddons }
+  } catch (e) {
+    console.warn('[auto-glow] Pricing tab read failed, using built-ins:', e?.message || e)
+    pricingCatalogState.snapshot = getBuiltinPricingSnapshot()
+  }
+  pricingCatalogState.loadedAt = now
+  return pricingCatalogState.snapshot
+}
+
+function invalidatePricingCatalogCache() {
+  pricingCatalogState.loadedAt = 0
+}
+
+function buildDefaultPricingSeedRows() {
+  const rows = [
+    ['PACKAGES'],
+    ['package_id', 'Car', 'Truck', 'Minivan', 'Compact SUV', 'Full-size SUV'],
+    ['interior-detail', 120, 120, 120, 120, 120],
+    ['exterior-detail', 200, 200, 200, 200, 200],
+    ['full-detail', 225, 295, 295, 225, 265],
+    ['full-everything', 700, 700, 700, 700, 700],
+    [],
+    ['ADDONS'],
+    ['addon_id', 'name', 'price'],
+  ]
+  for (const [id, m] of Object.entries(ADDON_META)) {
+    rows.push([id, m.name, m.price])
+  }
+  return rows
+}
+
 const PACKAGE_NAMES = {
   'interior-detail': 'Interior Detail',
   'exterior-detail': 'Exterior Detail',
@@ -165,6 +370,7 @@ const NETLIFY_API_ROOT_SEGMENTS = new Set([
   'availability',
   'health',
   'loyalty',
+  'pricing',
 ])
 
 /** Package IDs that count as one punch on the detail loyalty card (Submitted Requests). */
@@ -577,6 +783,21 @@ async function getSheets() {
   return google.sheets({ version: 'v4', auth: client })
 }
 
+/** Write PACKAGES + ADDONS template to the Pricing tab (used by admin seed + `npm run seed:pricing`). */
+export async function seedPricingTabToSpreadsheet() {
+  assertSheetsEnv()
+  const sheets = await getSheets()
+  const safe = PRICING_TAB.replace(/'/g, "''")
+  const values = buildDefaultPricingSeedRows()
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${safe}'!A1`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values },
+  })
+  return { tab: PRICING_TAB, rows: values.length }
+}
+
 async function readCalendarRows(sheets) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
@@ -663,7 +884,8 @@ function labelVehicleTypeServer(t) {
 }
 
 function formatAddonSlot(id) {
-  const m = ADDON_META[id]
+  const cat = getActivePricingCatalog()
+  const m = cat.addons[id] || ADDON_META[id]
   return m ? `${m.name} ($${m.price})` : String(id || '')
 }
 
@@ -949,6 +1171,7 @@ function findQueueRowIndexByRef(values, clientReferenceId) {
 
 /** Pending rows for admin UI (same shape as GET /api/admin/request-queue). */
 async function loadPendingRequestQueueForAdmin(sheets) {
+  await refreshPricingCatalog(sheets)
   const values = await readRequestQueueValues(sheets)
   const pending = []
   for (let i = REQUEST_QUEUE_HEADER_ROWS; i < values.length; i++) {
@@ -958,6 +1181,12 @@ async function loadPendingRequestQueueForAdmin(sheets) {
     if (status.toLowerCase() !== 'pending') continue
     try {
       const body = bookingBodyFromSubmissionRow(row)
+      const sheetPackageLabel = String(row[7] ?? '').trim()
+      const packageLabel =
+        sheetPackageLabel ||
+        PACKAGE_NAMES[body.selectedPackageId] ||
+        body.selectedPackageId ||
+        ''
       pending.push({
         sheetRow: i + 1,
         clientReferenceId: body.clientReferenceId,
@@ -969,7 +1198,9 @@ async function loadPendingRequestQueueForAdmin(sheets) {
         timeSummary: String(row[SUB_COL_TIME_LABEL] ?? '').trim(),
         fullDayCeramic: String(row[SUB_COL_FULL_DAY] ?? '').trim(),
         packageId: body.selectedPackageId,
-        packageLabel: String(row[7] ?? '').trim(),
+        packageLabel,
+        packagePrice: body.totals?.packageLine?.amount ?? null,
+        addonsLineTotal: body.totals?.addonsLine?.amount ?? 0,
         vehicleDescription: body.vehicle.description,
         vehicleTypeLabel: String(row[5] ?? '').trim(),
         selectedAddonIds: body.selectedAddonIds,
@@ -1089,23 +1320,17 @@ function queueTimeCellToPreferredSlot(timeLabelRaw, fullDay, selectedAddonIds) {
 }
 
 function resolvePackagePriceServer(packageId, vehicleType) {
-  if (packageId === 'full-everything') return 700
-  const pkgName = PACKAGE_NAMES[packageId]
-  if (!pkgName) return null
-  if (packageId === 'full-detail') {
-    if (!vehicleType || !VEHICLE_TYPE_LABELS[vehicleType]) return null
-    const byClass = {
-      car: 225,
-      'suv-compact': 225,
-      'suv-fullsize': 265,
-      truck: 295,
-      minivan: 295,
-    }
-    return byClass[vehicleType] ?? null
-  }
-  if (packageId === 'interior-detail') return 120
-  if (packageId === 'exterior-detail') return 200
-  return null
+  if (!PACKAGE_NAMES[packageId]) return null
+  const catalog = getActivePricingCatalog()
+  const row = catalog.packages[packageId]
+  if (!row) return null
+  const vals = Object.values(row).filter((x) => typeof x === 'number' && Number.isFinite(x))
+  if (vals.length === 0) return null
+  const uniform = vals.every((v) => v === vals[0])
+  if (uniform) return vals[0]
+  if (!vehicleType || !VEHICLE_TYPE_LABELS[vehicleType]) return null
+  const n = row[vehicleType]
+  return typeof n === 'number' && Number.isFinite(n) ? n : null
 }
 
 function recomputeTotalsOnBody(body) {
@@ -1113,9 +1338,10 @@ function recomputeTotalsOnBody(body) {
   const vehicleType = body.vehicle?.type
   const packagePrice = resolvePackagePriceServer(pkgId, vehicleType)
   const ids = Array.isArray(body.selectedAddonIds) ? body.selectedAddonIds : []
+  const catalog = getActivePricingCatalog()
   let addonsTotal = 0
   for (const id of ids) {
-    addonsTotal += ADDON_META[id]?.price ?? 0
+    addonsTotal += catalog.addons[id]?.price ?? ADDON_META[id]?.price ?? 0
   }
   const grand = packagePrice != null ? packagePrice + addonsTotal : null
   const pkgLabel = PACKAGE_NAMES[pkgId] || pkgId
@@ -1282,6 +1508,24 @@ function createApp() {
     })
   })
 
+  app.get('/api/pricing', async (_req, res) => {
+    try {
+      assertSheetsEnv()
+    } catch {
+      const snap = getBuiltinPricingSnapshot()
+      return res.json({ packages: snap.packages, addons: snap.addons })
+    }
+    try {
+      const sheets = await getSheets()
+      const snap = await refreshPricingCatalog(sheets)
+      return res.json({ packages: snap.packages, addons: snap.addons })
+    } catch (err) {
+      console.error(err)
+      const snap = getBuiltinPricingSnapshot()
+      return res.json({ packages: snap.packages, addons: snap.addons })
+    }
+  })
+
   app.get('/api/availability', async (req, res) => {
     try {
       assertSheetsEnv()
@@ -1436,6 +1680,9 @@ function createApp() {
 
     try {
       const sheets = await getSheets()
+      await refreshPricingCatalog(sheets)
+      recomputeTotalsOnBody(body)
+
       const calRow = await findOrCreateDateRow(sheets, dateISO)
       const rows = await readCalendarRows(sheets)
       const parsed = parseRows(rows)
@@ -1496,6 +1743,28 @@ function createApp() {
     }
   })
 
+  app.post('/api/admin/pricing/seed', requireAdmin, async (_req, res) => {
+    try {
+      assertSheetsEnv()
+    } catch (e) {
+      return res.status(e.status || 500).json({ error: e.message })
+    }
+    try {
+      const { tab, rows } = await seedPricingTabToSpreadsheet()
+      invalidatePricingCatalogCache()
+      const sheets = await getSheets()
+      await refreshPricingCatalog(sheets)
+      return res.json({ ok: true, tab, rows })
+    } catch (err) {
+      console.error(err)
+      return res.status(500).json({
+        error:
+          formatGoogleSheetsError(err) ||
+          `Could not write Pricing tab "${PRICING_TAB}" (create the tab or check service account access).`,
+      })
+    }
+  })
+
   async function handleAdminGetRequestQueue(_req, res) {
     try {
       assertSheetsEnv()
@@ -1528,6 +1797,7 @@ function createApp() {
     }
     try {
       const sheets = await getSheets()
+      await refreshPricingCatalog(sheets)
       const values = await readRequestQueueValues(sheets)
       const idx = findQueueRowIndexByRef(values, clientReferenceId)
       if (idx < 0) return res.status(404).json({ error: 'Queue entry not found' })

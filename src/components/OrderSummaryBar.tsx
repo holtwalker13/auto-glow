@@ -1,9 +1,10 @@
-import { getPackageById, resolvePackagePrice } from '../data/services'
+import { getAddonById, getPackageById, loyaltyDiscountScopeWord, resolvePackagePrice } from '../data/services'
 import type { VehicleType } from '../types/request'
 import {
   computeAddonTotal,
   computeGrandTotal,
   computeLoyaltyAdjustedGrand,
+  partitionAddonIdsForLoyaltyDisplay,
 } from '../lib/buildPayload'
 
 function formatPrice(n: number | null): string {
@@ -31,6 +32,12 @@ export function OrderSummaryBar({
     grand != null && loyaltyDiscountPercent > 0
       ? computeLoyaltyAdjustedGrand(pkgPrice, selectedAddonIds, loyaltyDiscountPercent)
       : null
+  const { eligibleAddonIds, premiumAddonIds } = partitionAddonIdsForLoyaltyDisplay(selectedAddonIds)
+  const scopeWord = loyaltyDiscountScopeWord(selectedPackageId)
+  const loyaltyLine =
+    loyalty && loyalty.savings > 0
+      ? `${Math.round(loyaltyDiscountPercent)}% off ${scopeWord}`
+      : null
 
   return (
     <div className="mb-2 rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/10 to-blue-900/25 px-3 py-2.5 shadow-inner shadow-cyan-500/5">
@@ -42,17 +49,38 @@ export function OrderSummaryBar({
           <dt className="truncate text-slate-400">{pkg?.name ?? 'Package'}</dt>
           <dd className="shrink-0 font-medium text-white">{formatPrice(pkgPrice)}</dd>
         </div>
-        <div className="flex justify-between gap-3">
-          <dt className="text-slate-400">Add-ons</dt>
-          <dd className="font-medium text-cyan-200">+${addonTotal}</dd>
-        </div>
-        {loyalty && loyalty.savings > 0 ? (
-          <div className="flex justify-between gap-3 text-emerald-200/95">
-            <dt className="truncate">
-              Loyalty ({Math.round(loyaltyDiscountPercent)}% off eligible)
-            </dt>
+        {eligibleAddonIds.map((id) => {
+          const a = getAddonById(id)
+          if (!a) return null
+          return (
+            <div key={id} className="flex justify-between gap-2 pl-1">
+              <dt className="min-w-0 truncate text-slate-500">{a.name}</dt>
+              <dd className="shrink-0 font-medium text-cyan-200/90">+${a.price}</dd>
+            </div>
+          )
+        })}
+        {loyaltyLine && loyalty ? (
+          <div className="flex justify-between gap-3 border-t border-white/10 pt-1 text-emerald-200/95">
+            <dt className="truncate">Loyalty — {loyaltyLine}</dt>
             <dd className="shrink-0 font-medium">−${loyalty.savings}</dd>
           </div>
+        ) : null}
+        {premiumAddonIds.length > 0 ? (
+          <>
+            <div className="border-t border-white/5 pt-1 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              Glow-ups (full price)
+            </div>
+            {premiumAddonIds.map((id) => {
+              const a = getAddonById(id)
+              if (!a) return null
+              return (
+                <div key={id} className="flex justify-between gap-2 pl-1">
+                  <dt className="min-w-0 truncate text-slate-500">{a.name}</dt>
+                  <dd className="shrink-0 font-medium text-cyan-200/90">+${a.price}</dd>
+                </div>
+              )
+            })}
+          </>
         ) : null}
         <div className="flex justify-between gap-3 border-t border-white/10 pt-1.5 text-sm">
           <dt className="font-semibold text-white">Est. total</dt>

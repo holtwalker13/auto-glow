@@ -38,6 +38,20 @@ export function applyLoyaltyPercentOff(
   return { totalAfter, savings: subtotal - totalAfter }
 }
 
+/** Split selection into loyalty-eligible add-ons vs premium Glow-ups (excluded from % off). */
+export function partitionAddonIdsForLoyaltyDisplay(selectedAddonIds: string[]): {
+  eligibleAddonIds: string[]
+  premiumAddonIds: string[]
+} {
+  const eligibleAddonIds: string[] = []
+  const premiumAddonIds: string[] = []
+  for (const id of selectedAddonIds) {
+    if (PREMIUM_UPSELL_ADDON_ID_SET.has(id)) premiumAddonIds.push(id)
+    else eligibleAddonIds.push(id)
+  }
+  return { eligibleAddonIds, premiumAddonIds }
+}
+
 /** Sum of Glow-up (premium) add-on prices in the selection. */
 export function computePremiumUpsellAddonTotal(selectedAddonIds: string[]): number {
   return selectedAddonIds.reduce((sum, id) => {

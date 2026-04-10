@@ -25,6 +25,7 @@ import { countFreeSlots } from './lib/calendarAvailability'
 import {
   addons,
   getSubAddonsForPackage,
+  loyaltyDiscountScopeWord,
   packages,
   premiumUpsells,
   SUB_ADDON_ID_SET,
@@ -381,7 +382,10 @@ export default function BookingWizard() {
         return
       }
     }
-    setStep((s) => Math.max(s - 1, 0))
+    if (step === 2 && subAddonsOpen) setSubAddonsOpen(false)
+    const nextStep = Math.max(step - 1, 0)
+    if (nextStep === 2 || (nextStep === 1 && step === 2)) setSubFlowCompletedKey('')
+    setStep(nextStep)
   }
 
   async function handleSubmit() {
@@ -583,34 +587,34 @@ export default function BookingWizard() {
             className="max-h-[88px] w-auto shrink-0 object-contain object-left sm:max-h-[130px]"
           />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            {entryKind === 'returning' ? (
-              <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-500/90">
-                Welcome back{returningWelcome ? `, ${returningWelcome}` : ''}
-              </p>
-            ) : null}
             {entryKind === 'returning' && loyaltySnapshot ? (
-              <p className="text-[11px] leading-snug text-emerald-200/90 sm:text-xs">
+              <p className="text-[11px] leading-snug text-emerald-200/90 sm:text-sm">
                 {loyaltySnapshot.recognized ? (
                   loyaltySnapshot.nextDiscountPercent > 0 ? (
-                    <>
-                      Unlocked for your next wash or detail:{' '}
-                      <span className="font-semibold text-emerald-100">
-                        {loyaltySnapshot.nextDiscountPercent}% off
-                      </span>{' '}
-                      on package & detail add-ons — premium Glow-ups full price (
-                      {loyaltySnapshot.punchesOnCard}/{loyaltySnapshot.maxPunches} punches).
-                    </>
+                    <span className="font-display text-base font-semibold italic text-emerald-50 sm:text-lg">
+                      Welcome back{returningWelcome ? `, ${returningWelcome}` : ''} —{' '}
+                      <span className="text-emerald-200/95">
+                        {loyaltySnapshot.nextDiscountPercent}% off your{' '}
+                        {loyaltyDiscountScopeWord(selectedPackageId)}
+                      </span>
+                    </span>
                   ) : (
-                    <>
-                      Punch card: {loyaltySnapshot.punchesOnCard}/{loyaltySnapshot.maxPunches} — your
-                      next detail is regular price; book a logged detail package to earn punches.
-                    </>
+                    <span className="text-emerald-200/90">
+                      Welcome back{returningWelcome ? `, ${returningWelcome}` : ''}. Punch card:{' '}
+                      {loyaltySnapshot.punchesOnCard}/{loyaltySnapshot.maxPunches} — next visit is regular
+                      price.
+                    </span>
                   )
                 ) : (
                   <span className="text-amber-200/85">
-                    This number is not in our job log yet — we will still use it on your request.
+                    Welcome back{returningWelcome ? `, ${returningWelcome}` : ''} — this number is not in
+                    our job log yet; we will still use it on your request.
                   </span>
                 )}
+              </p>
+            ) : entryKind === 'returning' ? (
+              <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-500/90 sm:text-xs">
+                Welcome back{returningWelcome ? `, ${returningWelcome}` : ''}
               </p>
             ) : null}
             <div className="flex min-w-0 items-center gap-2 sm:gap-2.5">
@@ -796,6 +800,7 @@ export default function BookingWizard() {
       />
       <FullEverythingUpsellModal
         open={fullEverythingOpen}
+        vehicleType={vehicleType}
         onAccept={acceptFullEverything}
         onDecline={declineFullEverything}
       />

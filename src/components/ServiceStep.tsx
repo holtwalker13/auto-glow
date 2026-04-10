@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import {
+  getFullDetailPriceRangeLabel,
   packages,
   resolvePackagePrice,
   type ServicePackage,
@@ -15,7 +16,7 @@ function formatPrice(n: number | null): string {
 function displayPackagePrice(pkg: ServicePackage, vehicleType: VehicleType | '') {
   const resolved = resolvePackagePrice(pkg.id, vehicleType)
   if (resolved !== null) return formatPrice(resolved)
-  if (pkg.id === 'full-detail') return '$225–$295'
+  if (pkg.id === 'full-detail') return getFullDetailPriceRangeLabel()
   return formatPrice(pkg.price)
 }
 

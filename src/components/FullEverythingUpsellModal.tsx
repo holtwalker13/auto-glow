@@ -1,17 +1,23 @@
 import { motion } from 'framer-motion'
 import { Sparkles, X } from 'lucide-react'
+import { resolvePackagePrice } from '../data/services'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
+import type { VehicleType } from '../types/request'
 
 export function FullEverythingUpsellModal({
   open,
+  vehicleType,
   onAccept,
   onDecline,
 }: {
   open: boolean
+  vehicleType: VehicleType | ''
   onAccept: () => void
   onDecline: () => void
 }) {
   const reduce = usePrefersReducedMotion()
+  const bundlePrice = resolvePackagePrice('full-everything', vehicleType)
+  const priceLabel = bundlePrice != null ? `$${bundlePrice}` : '—'
 
   if (!open) return null
 
@@ -59,7 +65,7 @@ export function FullEverythingUpsellModal({
             <strong className="text-cyan-200/85">Full Everything</strong> bundle wraps the big-ticket
             interior + exterior work into <strong className="text-white">one simple price</strong>.
           </p>
-          <p className="mt-4 font-display text-3xl font-bold italic text-cyan-200/90">$700</p>
+          <p className="mt-4 font-display text-3xl font-bold italic text-cyan-200/90">{priceLabel}</p>
           <p className="mt-1 text-xs text-slate-500">Limited-time bundle pricing · Glow-up add-ons stay separate</p>
 
           <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:justify-center">

@@ -33,6 +33,19 @@ export function labelPreferredTime(value: PreferredTimeSlot): string {
   return PREFERRED_TIME_OPTIONS.find((o) => o.value === value)?.label ?? value
 }
 
+/** Reverse sheet / admin labels (Submitted Requests col F) → vehicle type for pricing. */
+export function vehicleTypeFromSheetLabel(label: string): VehicleType | '' {
+  const t = label.trim()
+  const map: Record<string, VehicleType> = {
+    Car: 'car',
+    Truck: 'truck',
+    Minivan: 'minivan',
+    'Compact SUV': 'suv-compact',
+    'Full-size SUV': 'suv-fullsize',
+  }
+  return map[t] ?? ''
+}
+
 export interface RequestPayload {
   clientReferenceId: string
   createdAt: string

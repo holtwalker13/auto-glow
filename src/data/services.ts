@@ -1,4 +1,9 @@
 import type { VehicleType } from '../types/request'
+import {
+  getClientAddonOverride,
+  getClientPackagePrice,
+  getClientPackagePriceAnyVehicle,
+} from '../lib/pricingClientStore'
 
 export type PackageSection = { title: string; items: string[] }
 
@@ -166,6 +171,12 @@ export function packageUsesTwoPhaseSubAddons(packageId: string): boolean {
   return packageId === 'full-detail' || packageId === 'full-everything'
 }
 
+/** Punch-card copy: interior/exterior packages → "cleaning"; full packages → "detail". */
+export function loyaltyDiscountScopeWord(packageId: string): 'cleaning' | 'detail' {
+  if (packageId === 'interior-detail' || packageId === 'exterior-detail') return 'cleaning'
+  return 'detail'
+}
+
 export const premiumUpsells: PremiumUpsell[] = [
   {
     id: 'premium-ceramic',
@@ -262,37 +273,57 @@ export const premiumOnlyAddons: Addon[] = [
 ]
 
 export function getAddonById(id: string): Addon | undefined {
-  return (
+  const base =
     addons.find((a) => a.id === id) ??
     premiumOnlyAddons.find((a) => a.id === id) ??
     SUB_ADDON_LIST.find((a) => a.id === id)
-  )
+  const o = getClientAddonOverride(id)
+  if (!base && !o) return undefined
+  if (!base) {
+    return { id, name: o!.name, price: o!.price }
+  }
+  if (!o) return base
+  return { ...base, name: o.name || base.name, price: o.price }
 }
 
 export function getPackageById(id: string): ServicePackage | undefined {
   return packages.find((p) => p.id === id)
 }
 
-/** Full Detail is priced by vehicle class; other packages use catalog `price`. */
+/**
+ * Package amount from the Pricing sheet (via /api/pricing) when loaded; otherwise built-in matrix
+ * in `pricingConstants`. Vehicle-specific rows need `vehicleType`.
+ */
 export function resolvePackagePrice(
   packageId: string,
   vehicleType: VehicleType | '',
 ): number | null {
-  const pkg = getPackageById(packageId)
-  if (!pkg) return null
-  if (packageId === 'full-everything') {
-    return 700
+  if (!getPackageById(packageId)) return null
+  if (vehicleType) {
+    const v = getClientPackagePrice(packageId, vehicleType)
+    if (v != null) return v
   }
-  if (packageId === 'full-detail') {
-    if (!vehicleType) return null
-    const byClass: Record<VehicleType, number> = {
-      car: 225,
-      'suv-compact': 225,
-      'suv-fullsize': 265,
-      truck: 295,
-      minivan: 295,
-    }
-    return byClass[vehicleType]
-  }
-  return pkg.price
+  const anyV = getClientPackagePriceAnyVehicle(packageId)
+  if (anyV != null) return anyV
+  if (!vehicleType) return null
+  return getPackageById(packageId)?.price ?? null
+}
+
+const ALL_VEHICLE_TYPES: VehicleType[] = [
+  'car',
+  'truck',
+  'minivan',
+  'suv-compact',
+  'suv-fullsize',
+]
+
+/** When vehicle type is not chosen yet, show min–max from the active pricing matrix. */
+export function getFullDetailPriceRangeLabel(): string {
+  const prices = ALL_VEHICLE_TYPES.map((t) => getClientPackagePrice('full-detail', t)).filter(
+    (n): n is number => n != null,
+  )
+  if (!prices.length) return 'Quote'
+  const lo = Math.min(...prices)
+  const hi = Math.max(...prices)
+  return lo === hi ? `$${lo}` : `$${lo}–$${hi}`
 }

@@ -1,8 +1,9 @@
-import { getAddonById, getPackageById, resolvePackagePrice } from '../data/services'
+import { getAddonById, getPackageById, loyaltyDiscountScopeWord, resolvePackagePrice } from '../data/services'
 import {
   computeAddonTotal,
   computeGrandTotal,
   computeLoyaltyAdjustedGrand,
+  partitionAddonIdsForLoyaltyDisplay,
 } from '../lib/buildPayload'
 import {
   labelPreferredTime,
@@ -47,6 +48,8 @@ export function ReviewStep({
     grand != null && loyaltyDiscountPercent > 0
       ? computeLoyaltyAdjustedGrand(pkgPrice, selectedAddonIds, loyaltyDiscountPercent)
       : null
+  const { eligibleAddonIds, premiumAddonIds } = partitionAddonIdsForLoyaltyDisplay(selectedAddonIds)
+  const scopeWord = loyaltyDiscountScopeWord(selectedPackageId)
 
   return (
     <div className="space-y-6 text-sm">
@@ -74,31 +77,60 @@ export function ReviewStep({
         <h3 className="font-display text-xs font-semibold uppercase tracking-wider text-cyan-400/90">
           Package & add-ons
         </h3>
-        <p className="mt-2 font-medium text-white">{pkg?.name}</p>
-        <p className="text-cyan-300">{pkgPrice === null ? 'Quote' : `$${pkgPrice}`}</p>
-        {selectedAddonIds.length > 0 ? (
-          <ul className="mt-3 space-y-1 border-t border-white/5 pt-3">
-            {selectedAddonIds.map((id) => {
-              const a = getAddonById(id)
-              return a ? (
-                <li key={id} className="flex justify-between gap-4 text-slate-400">
-                  <span>{a.name}</span>
-                  <span className="text-cyan-200/90">+${a.price}</span>
-                </li>
-              ) : null
-            })}
-          </ul>
+        <div className="mt-2 flex justify-between gap-4 font-medium text-white">
+          <span>{pkg?.name}</span>
+          <span className="text-cyan-300">{pkgPrice === null ? 'Quote' : `$${pkgPrice}`}</span>
+        </div>
+
+        {eligibleAddonIds.length > 0 ? (
+          <div className="mt-3 border-t border-white/5 pt-3">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              Service add-ons (included in punch discount)
+            </p>
+            <ul className="mt-2 space-y-1">
+              {eligibleAddonIds.map((id) => {
+                const a = getAddonById(id)
+                return a ? (
+                  <li key={id} className="flex justify-between gap-4 text-slate-400">
+                    <span>{a.name}</span>
+                    <span className="text-cyan-200/90">+${a.price}</span>
+                  </li>
+                ) : null
+              })}
+            </ul>
+          </div>
         ) : (
-          <p className="mt-2 text-slate-500">No add-ons selected.</p>
+          <p className="mt-2 text-slate-500">No service add-ons selected.</p>
         )}
+
         {loyalty && loyalty.savings > 0 ? (
-          <div className="mt-3 flex justify-between gap-4 border-t border-white/5 pt-3 text-slate-400">
+          <div className="mt-3 flex justify-between gap-4 border-t border-white/10 pt-3 text-slate-400">
             <span>
-              Loyalty discount ({Math.round(loyaltyDiscountPercent)}% off eligible)
+              Loyalty — {Math.round(loyaltyDiscountPercent)}% off {scopeWord}
             </span>
             <span className="font-medium text-emerald-200/90">−${loyalty.savings}</span>
           </div>
         ) : null}
+
+        {premiumAddonIds.length > 0 ? (
+          <div className="mt-3 border-t border-white/10 pt-3">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              Glow-up add-ons (full price)
+            </p>
+            <ul className="mt-2 space-y-1">
+              {premiumAddonIds.map((id) => {
+                const a = getAddonById(id)
+                return a ? (
+                  <li key={id} className="flex justify-between gap-4 text-slate-400">
+                    <span>{a.name}</span>
+                    <span className="text-cyan-200/90">+${a.price}</span>
+                  </li>
+                ) : null
+              })}
+            </ul>
+          </div>
+        ) : null}
+
         <div className="mt-4 flex justify-between border-t border-white/10 pt-3 text-base font-semibold text-white">
           <span>Estimated total</span>
           <span className="font-display italic text-cyan-300">

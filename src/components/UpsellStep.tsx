@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Check } from 'lucide-react'
-import { premiumUpsells } from '../data/services'
+import { getAddonById, premiumUpsells } from '../data/services'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 
 export function UpsellStep({
@@ -93,7 +93,7 @@ export function UpsellStep({
                           ) : null}
                         </div>
                         <span className="rounded-full bg-black/50 px-3 py-1 text-sm font-semibold text-cyan-300 backdrop-blur">
-                          ${card.price}
+                          ${getAddonById(card.addonId)?.price ?? card.price}
                         </span>
                       </div>
                     </div>
