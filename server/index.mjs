@@ -111,6 +111,7 @@ const QUEUE_HEADERS = [...SUBMISSION_HEADERS, 'Status']
 const VEHICLE_TYPE_LABELS = {
   car: 'Car',
   truck: 'Truck',
+  minivan: 'Minivan',
   'suv-compact': 'Compact SUV',
   'suv-fullsize': 'Full-size SUV',
 }
@@ -175,12 +176,77 @@ const LOYALTY_PUNCH_PACKAGE_IDS = new Set([
 ])
 
 const LOYALTY_MAX_PUNCHES = 5
+/** Punches in the current window count toward the card; window restarts from the first detail on or after the prior window ends. */
+const LOYALTY_WINDOW_DAYS = 365
+/** One label per punch slot: discount you unlock after that visit in the current loyalty year. */
+const LOYALTY_TIER_LABELS = ['10% off', '15% off', '20% off', '25% off', '30% off']
+const LOYALTY_ANNUAL_RESET_NOTE =
+  'Punch progress resets every 365 days from your first qualifying detail in each loyalty year; your next qualifying detail after a reset starts a new year.'
 
-/** Next-visit discount % after `completedPunches` detail jobs logged in Submitted Requests (0 = regular price). */
+/** Next-visit discount % after `completedPunches` in the current 365-day window (0 = regular price). */
 function loyaltyNextDiscountPercent(completedPunches) {
   const n = Math.max(0, completedPunches)
-  const tier = [0, 20, 30, 40, 50]
+  const tier = [0, 10, 15, 20, 25, 30]
   return tier[Math.min(n, tier.length - 1)]
+}
+
+function addDaysToIso(iso, deltaDays) {
+  const [y, m, d] = String(iso)
+    .trim()
+    .split('-')
+    .map(Number)
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
+  const x = new Date(y, m - 1, d)
+  x.setDate(x.getDate() + deltaDays)
+  const yy = x.getFullYear()
+  const mm = String(x.getMonth() + 1).padStart(2, '0')
+  const dd = String(x.getDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+/** Calendar date in America/Chicago (shop locale) for loyalty window comparisons. */
+function todayIsoCentral() {
+  try {
+    const s = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  } catch {
+    /* fall through */
+  }
+  const now = new Date()
+  const yy = now.getFullYear()
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+/**
+ * @param {{ dateISO: string }[]} events sorted ascending by dateISO
+ * @param {string} todayISO YYYY-MM-DD
+ */
+function loyaltyPunchesInCurrent365Window(events, todayISO) {
+  if (events.length === 0) return 0
+  let periodStart = events[0].dateISO
+  for (;;) {
+    const periodEndExclusive = addDaysToIso(periodStart, LOYALTY_WINDOW_DAYS)
+    if (!periodEndExclusive) return 0
+    if (todayISO < periodEndExclusive) {
+      return events.filter((e) => e.dateISO >= periodStart && e.dateISO < periodEndExclusive).length
+    }
+    const next = events.find((e) => e.dateISO >= periodEndExclusive)
+    if (!next) return 0
+    periodStart = next.dateISO
+  }
+}
+
+function loyaltyDetailDateFromRow(row) {
+  const fromPreferred =
+    submissionPreferredDateToISO(row[SUB_COL_DATE]) || normalizeToISODate(String(row[SUB_COL_DATE] ?? ''))
+  if (fromPreferred && /^\d{4}-\d{2}-\d{2}$/.test(fromPreferred)) return fromPreferred
+  const submittedAt = String(row[0] ?? '').trim()
+  const fromSubmitted =
+    submissionPreferredDateToISO(submittedAt) || normalizeToISODate(submittedAt)
+  if (fromSubmitted && /^\d{4}-\d{2}-\d{2}$/.test(fromSubmitted)) return fromSubmitted
+  return null
 }
 
 function phoneDigitsKey(s) {
@@ -659,56 +725,6 @@ function buildSubmissionDataRow(body, calendarLabel) {
   ]
 }
 
-function parseCalendarBookingLabelServer(label) {
-  const parts = String(label ?? '')
-    .split(/\s*[\u2014\u2013]\s*|\s+-\s+/)
-    .map((p) => p.trim())
-    .filter(Boolean)
-  return {
-    name: parts[0] ?? '',
-    vehicleTypeRaw: parts[1] ?? '',
-    vehicleDesc: parts.slice(2).join(' · '),
-  }
-}
-
-/** One row from calendar cells only (no full form). Phone/email optional (e.g. from prior lookup). */
-function buildBackfillSubmissionRow(dateISO, label, slots, extras = {}) {
-  const { name, vehicleTypeRaw, vehicleDesc } = parseCalendarBookingLabelServer(label)
-  const vehicleTypeLabel = labelVehicleTypeServer(vehicleTypeRaw) || vehicleTypeRaw
-  const orderedSlots = [...new Set(slots)].filter((s) => SLOTS.includes(s)).sort()
-  const allDay = orderedSlots.length >= 3
-  const timeLabel = allDay
-    ? 'Full day (all slots)'
-    : orderedSlots.map((s) => SLOT_LABELS[s] || s).join(', ')
-  const ref = `calendar-backfill-${Date.now()}`
-  const emptyAddons = ['', '', '', '', '']
-  return [
-    new Date().toISOString(),
-    ref,
-    name,
-    String(extras.phone ?? '').trim(),
-    String(extras.email ?? '').trim(),
-    vehicleTypeLabel,
-    vehicleDesc,
-    '',
-    '',
-    '',
-    ...emptyAddons,
-    '',
-    '',
-    dateISO,
-    timeLabel,
-    allDay ? 'Yes' : 'No',
-    '',
-    '',
-    '',
-    String(extras.notes ?? '').trim(),
-    label,
-    '',
-    '',
-  ]
-}
-
 function formatGoogleSheetsError(err) {
   const base = err?.message || String(err)
   const d = err?.response?.data
@@ -730,11 +746,12 @@ async function readSubmittedRequestsValues(sheets) {
 /**
  * @returns {{ anyRow: boolean, completedPunches: number, lastName: string, lastEmail: string }}
  */
-function loyaltySummarizeFromSubmittedRows(values, phoneKey) {
+function loyaltySummarizeFromSubmittedRows(values, phoneKey, todayISO) {
   let anyRow = false
-  let completedPunches = 0
   let lastName = ''
   let lastEmail = ''
+  const punchEvents = []
+
   for (let i = SUBMISSIONS_HEADER_ROWS; i < values.length; i++) {
     const row = values[i]
     if (!row) continue
@@ -743,9 +760,14 @@ function loyaltySummarizeFromSubmittedRows(values, phoneKey) {
     anyRow = true
     const pkgId = String(row[SUB_COL_PACKAGE_ID] ?? '').trim()
     if (LOYALTY_PUNCH_PACKAGE_IDS.has(pkgId)) {
-      completedPunches += 1
+      const dateISO = loyaltyDetailDateFromRow(row)
+      if (dateISO) punchEvents.push({ dateISO })
     }
   }
+
+  punchEvents.sort((a, b) => a.dateISO.localeCompare(b.dateISO))
+  const completedPunches = loyaltyPunchesInCurrent365Window(punchEvents, todayISO)
+
   for (let i = values.length - 1; i >= SUBMISSIONS_HEADER_ROWS; i--) {
     const row = values[i]
     if (!row) continue
@@ -986,8 +1008,84 @@ const VEHICLE_LABEL_TO_TYPE = Object.fromEntries(
 
 const TIME_LABEL_TO_SLOT = {
   '10 AM': '10:00',
+  '10:00 AM': '10:00',
   '2 PM': '14:00',
+  '2:00 PM': '14:00',
   '4 PM': '16:00',
+  '4:00 PM': '16:00',
+  '10:00': '10:00',
+  '14:00': '14:00',
+  '16:00': '16:00',
+}
+
+/**
+ * e.g. "4:00 PM", "4 PM", "10:00 am" → '16:00' / '10:00' (only our three shop slots).
+ */
+function parseTwelveHourQueueLabelToSlot(s) {
+  const collapsed = String(s ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const m = collapsed.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*$/i)
+  if (!m) return ''
+  let h = parseInt(m[1], 10)
+  const min = m[2] !== undefined ? parseInt(m[2], 10) : 0
+  const ap = m[3].toLowerCase()
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return ''
+  if (ap === 'pm' && h !== 12) h += 12
+  if (ap === 'am' && h === 12) h = 0
+  if (min !== 0) return ''
+  if (h === 10) return '10:00'
+  if (h === 14) return '14:00'
+  if (h === 16) return '16:00'
+  return ''
+}
+
+/**
+ * Map Requests Queue "Time Slot" cell → calendar slot key. Sheets may store display labels,
+ * 24h times from the API, or leave the cell blank.
+ */
+function queueTimeCellToPreferredSlot(timeLabelRaw, fullDay, selectedAddonIds) {
+  const ids = Array.isArray(selectedAddonIds) ? selectedAddonIds : []
+  const ceramic = ids.includes(CERAMIC_ADDON_ID)
+  if (fullDay || ceramic) {
+    return '10:00'
+  }
+  const s0 = String(timeLabelRaw ?? '').trim()
+  if (SLOTS.includes(s0)) return s0
+
+  const collapsed = s0.replace(/\s+/g, ' ').trim()
+  if (TIME_LABEL_TO_SLOT[collapsed]) return TIME_LABEL_TO_SLOT[collapsed]
+  const lower = collapsed.toLowerCase()
+  for (const [label, slot] of Object.entries(TIME_LABEL_TO_SLOT)) {
+    if (label.toLowerCase() === lower) return slot
+  }
+  for (const slot of SLOTS) {
+    const lab = SLOT_LABELS[slot]
+    if (lab && lab.toLowerCase() === lower) return slot
+  }
+  const from12 = parseTwelveHourQueueLabelToSlot(collapsed)
+  if (from12) return from12
+  const hm = lower.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/)
+  if (hm) {
+    const hh = parseInt(hm[1], 10)
+    const mm = parseInt(hm[2], 10)
+    if (mm === 0 && (hh === 10 || hh === 14 || hh === 16)) {
+      if (hh === 10) return '10:00'
+      if (hh === 14) return '14:00'
+      return '16:00'
+    }
+  }
+  if (/^10\s*am$/i.test(collapsed)) return '10:00'
+  if (/^2\s*pm$/i.test(collapsed)) return '14:00'
+  if (/^4\s*pm$/i.test(collapsed)) return '16:00'
+
+  if (!s0) {
+    console.warn(
+      '[auto-glow] Requests Queue row missing Time Slot (non-ceramic); defaulting to 10:00 for accept.',
+    )
+    return '10:00'
+  }
+  return ''
 }
 
 function resolvePackagePriceServer(packageId, vehicleType) {
@@ -996,7 +1094,13 @@ function resolvePackagePriceServer(packageId, vehicleType) {
   if (!pkgName) return null
   if (packageId === 'full-detail') {
     if (!vehicleType || !VEHICLE_TYPE_LABELS[vehicleType]) return null
-    const byClass = { car: 225, 'suv-compact': 225, 'suv-fullsize': 265, truck: 295 }
+    const byClass = {
+      car: 225,
+      'suv-compact': 225,
+      'suv-fullsize': 265,
+      truck: 295,
+      minivan: 295,
+    }
     return byClass[vehicleType] ?? null
   }
   if (packageId === 'interior-detail') return 120
@@ -1034,14 +1138,14 @@ function bookingBodyFromSubmissionRow(row) {
         .map((s) => s.trim())
         .filter(Boolean)
     : []
+  const rawPreferred = row[SUB_COL_DATE]
   const dateISO =
-    submissionPreferredDateToISO(row[SUB_COL_DATE]) || String(row[SUB_COL_DATE] ?? '').trim()
+    submissionPreferredDateToISO(rawPreferred) ||
+    normalizeToISODate(String(rawPreferred ?? '').trim()) ||
+    ''
   const fullDay = String(row[SUB_COL_FULL_DAY] ?? '').trim().toLowerCase() === 'yes'
   const timeLabel = String(row[SUB_COL_TIME_LABEL] ?? '').trim()
-  let preferredTimeSlot = '10:00'
-  if (!fullDay) {
-    preferredTimeSlot = TIME_LABEL_TO_SLOT[timeLabel] || ''
-  }
+  const preferredTimeSlot = queueTimeCellToPreferredSlot(timeLabel, fullDay, selectedAddonIds)
   const loc = String(row[SUB_COL_LOCATION] ?? '').trim()
   const locationMode = loc.startsWith('Shop') ? 'shop' : 'mobile'
   const vtLabel = String(row[5] ?? '').trim()
@@ -1224,6 +1328,7 @@ function createApp() {
       const { anyRow, completedPunches, lastName, lastEmail } = loyaltySummarizeFromSubmittedRows(
         values,
         phoneKey,
+        todayIsoCentral(),
       )
       const firstName = loyaltyFirstNameFromFullName(lastName)
       const punchesOnCard = Math.min(completedPunches, LOYALTY_MAX_PUNCHES)
@@ -1241,8 +1346,8 @@ function createApp() {
         maxPunches: LOYALTY_MAX_PUNCHES,
         nextDiscountPercent,
         firstName,
-        /** Labels for the five milestones (visit pricing / reward ladder). */
-        tierLabels: ['Regular price', '20% off', '30% off', '40% off', '50% off'],
+        tierLabels: LOYALTY_TIER_LABELS,
+        annualResetNote: anyRow ? LOYALTY_ANNUAL_RESET_NOTE : '',
         message,
         contactHint: {
           name: lastName,
@@ -1369,36 +1474,6 @@ function createApp() {
 
   app.get('/api/admin/submissions-schema', requireAdmin, (_req, res) => {
     return res.json({ tab: SUBMISSIONS_TAB, headers: SUBMISSION_HEADERS })
-  })
-
-  app.post('/api/admin/append-submission-from-calendar', requireAdmin, async (req, res) => {
-    try {
-      assertSheetsEnv()
-    } catch (e) {
-      return res.status(e.status || 500).json({ error: e.message })
-    }
-    const dateISO = normalizeToISODate(req.body?.date)
-    const label = typeof req.body?.label === 'string' ? req.body.label.trim() : ''
-    const slots = Array.isArray(req.body?.slots) ? req.body.slots : []
-    if (!dateISO) return res.status(400).json({ error: 'Invalid or missing date' })
-    if (!label) return res.status(400).json({ error: 'label is required' })
-    if (slots.length === 0 || !slots.every((s) => typeof s === 'string' && SLOTS.includes(s))) {
-      return res.status(400).json({ error: 'slots must be a non-empty array of 10:00, 14:00, and/or 16:00' })
-    }
-    const extras = {
-      phone: typeof req.body?.phone === 'string' ? req.body.phone : '',
-      email: typeof req.body?.email === 'string' ? req.body.email : '',
-      notes: typeof req.body?.notes === 'string' ? req.body.notes : '',
-    }
-    try {
-      const sheets = await getSheets()
-      const dataRow = buildBackfillSubmissionRow(dateISO, label, slots, extras)
-      await appendSubmittedRequestsDataRow(sheets, dataRow)
-      return res.json({ ok: true, tab: SUBMISSIONS_TAB })
-    } catch (err) {
-      console.error(err)
-      return res.status(500).json({ error: formatGoogleSheetsError(err) || 'Append failed' })
-    }
   })
 
   app.post('/api/admin/write-submissions-headers', requireAdmin, async (_req, res) => {
@@ -1579,7 +1654,7 @@ function createApp() {
       return res.status(404).json({
         matched: false,
         error:
-          'No Submitted Requests row for this booking. Phone/email only exist there after a site booking or “Log to Submitted Requests”; the calendar cell itself does not store phone numbers.',
+          'No Submitted Requests row for this booking. Phone/email are stored there after a site booking or when you accept a request from the queue; the calendar cell itself does not store phone numbers.',
       })
     } catch (err) {
       console.error(err)

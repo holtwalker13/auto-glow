@@ -1,6 +1,7 @@
 import {
   getAddonById,
   getPackageById,
+  PREMIUM_UPSELL_ADDON_ID_SET,
   resolvePackagePrice,
   type Addon,
 } from '../data/services'
@@ -24,6 +25,59 @@ export function computeGrandTotal(
 ): number | null {
   if (packagePrice === null) return null
   return packagePrice + addonTotal
+}
+
+/** Whole-dollar subtotal after punch-card % off (caller supplies eligible subtotal only). */
+export function applyLoyaltyPercentOff(
+  subtotal: number,
+  loyaltyDiscountPercent: number,
+): { totalAfter: number; savings: number } {
+  const pct = Math.min(100, Math.max(0, Math.round(loyaltyDiscountPercent)))
+  if (pct <= 0 || subtotal <= 0) return { totalAfter: subtotal, savings: 0 }
+  const totalAfter = Math.round((subtotal * (100 - pct)) / 100)
+  return { totalAfter, savings: subtotal - totalAfter }
+}
+
+/** Sum of Glow-up (premium) add-on prices in the selection. */
+export function computePremiumUpsellAddonTotal(selectedAddonIds: string[]): number {
+  return selectedAddonIds.reduce((sum, id) => {
+    if (!PREMIUM_UPSELL_ADDON_ID_SET.has(id)) return sum
+    const a = getAddonById(id)
+    return sum + (a?.price ?? 0)
+  }, 0)
+}
+
+/**
+ * Punch-card discount on package + non–premium add-ons only; premium Glow-up line stays full price.
+ */
+export function computeLoyaltyAdjustedGrand(
+  packagePrice: number | null,
+  selectedAddonIds: string[],
+  loyaltyDiscountPercent: number,
+): {
+  grandBeforeLoyalty: number | null
+  premiumAddonTotal: number
+  savings: number
+  grandAfterLoyalty: number | null
+} {
+  const addonTotal = computeAddonTotal(selectedAddonIds)
+  const grandBeforeLoyalty = computeGrandTotal(packagePrice, addonTotal)
+  const premiumAddonTotal = computePremiumUpsellAddonTotal(selectedAddonIds)
+  if (packagePrice === null || loyaltyDiscountPercent <= 0) {
+    return {
+      grandBeforeLoyalty,
+      premiumAddonTotal,
+      savings: 0,
+      grandAfterLoyalty: grandBeforeLoyalty,
+    }
+  }
+  const eligibleSubtotal = packagePrice + (addonTotal - premiumAddonTotal)
+  const { totalAfter: eligibleAfter, savings } = applyLoyaltyPercentOff(
+    eligibleSubtotal,
+    loyaltyDiscountPercent,
+  )
+  const grandAfterLoyalty = eligibleAfter + premiumAddonTotal
+  return { grandBeforeLoyalty, premiumAddonTotal, savings, grandAfterLoyalty }
 }
 
 export function buildRequestPayload(input: {

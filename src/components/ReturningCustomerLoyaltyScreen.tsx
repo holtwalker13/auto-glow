@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { formatUsPhoneInput, phoneDigitsOnly } from '../lib/formatUsPhone'
 import { firstNameFromFullName } from '../lib/personName'
 
+const DEFAULT_LOYALTY_TIER_LABELS = ['10% off', '15% off', '20% off', '25% off', '30% off'] as const
+
 export type LoyaltyLookupResult = {
   recognized: boolean
   completedPunches: number
@@ -9,6 +11,8 @@ export type LoyaltyLookupResult = {
   maxPunches: number
   nextDiscountPercent: number
   tierLabels: string[]
+  /** Shown when we recognize the phone; explains 365-day rolling reset. */
+  annualResetNote?: string
   message: string
   /** First name from job history (for greetings). */
   firstName: string
@@ -68,7 +72,12 @@ export function ReturningCustomerLoyaltyScreen({
         punchesOnCard: Number(data.punchesOnCard) || 0,
         maxPunches: Number(data.maxPunches) || 5,
         nextDiscountPercent: Number(data.nextDiscountPercent) || 0,
-        tierLabels: Array.isArray(data.tierLabels) ? data.tierLabels : [],
+        tierLabels:
+          Array.isArray(data.tierLabels) && data.tierLabels.length > 0
+            ? data.tierLabels
+            : [...DEFAULT_LOYALTY_TIER_LABELS],
+        annualResetNote:
+          typeof data.annualResetNote === 'string' ? data.annualResetNote.trim() : '',
         message: typeof data.message === 'string' ? data.message : '',
         firstName: resolvedFirst,
         contactHint: {
@@ -177,6 +186,11 @@ export function ReturningCustomerLoyaltyScreen({
                 )
               })}
             </div>
+            {loyalty.annualResetNote ? (
+              <p className="mt-3 text-center text-[11px] leading-snug text-slate-500 sm:text-xs">
+                {loyalty.annualResetNote}
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-center">

@@ -1,5 +1,9 @@
 import { getAddonById, getPackageById, resolvePackagePrice } from '../data/services'
-import { computeAddonTotal, computeGrandTotal } from '../lib/buildPayload'
+import {
+  computeAddonTotal,
+  computeGrandTotal,
+  computeLoyaltyAdjustedGrand,
+} from '../lib/buildPayload'
 import {
   labelPreferredTime,
   labelVehicleType,
@@ -20,6 +24,7 @@ export function ReviewStep({
   hasCeramicCoating,
   address,
   parkingNotes,
+  loyaltyDiscountPercent = 0,
 }: {
   contact: { name: string; phone: string; email: string; notes: string }
   vehicleType: VehicleType | ''
@@ -32,11 +37,16 @@ export function ReviewStep({
   hasCeramicCoating: boolean
   address: string
   parkingNotes: string
+  loyaltyDiscountPercent?: number
 }) {
   const pkg = getPackageById(selectedPackageId)
   const pkgPrice = resolvePackagePrice(selectedPackageId, vehicleType)
   const addonTotal = computeAddonTotal(selectedAddonIds)
   const grand = computeGrandTotal(pkgPrice, addonTotal)
+  const loyalty =
+    grand != null && loyaltyDiscountPercent > 0
+      ? computeLoyaltyAdjustedGrand(pkgPrice, selectedAddonIds, loyaltyDiscountPercent)
+      : null
 
   return (
     <div className="space-y-6 text-sm">
@@ -81,10 +91,22 @@ export function ReviewStep({
         ) : (
           <p className="mt-2 text-slate-500">No add-ons selected.</p>
         )}
+        {loyalty && loyalty.savings > 0 ? (
+          <div className="mt-3 flex justify-between gap-4 border-t border-white/5 pt-3 text-slate-400">
+            <span>
+              Loyalty discount ({Math.round(loyaltyDiscountPercent)}% off eligible)
+            </span>
+            <span className="font-medium text-emerald-200/90">−${loyalty.savings}</span>
+          </div>
+        ) : null}
         <div className="mt-4 flex justify-between border-t border-white/10 pt-3 text-base font-semibold text-white">
           <span>Estimated total</span>
           <span className="font-display italic text-cyan-300">
-            {grand === null ? 'Quote + add-ons' : `$${grand}`}
+            {grand === null
+              ? 'Quote + add-ons'
+              : loyalty && loyalty.savings > 0
+                ? `$${loyalty.grandAfterLoyalty ?? grand}`
+                : `$${grand}`}
           </span>
         </div>
       </section>
@@ -107,7 +129,9 @@ export function ReviewStep({
         </p>
         <p className="mt-1 text-slate-300">
           <span className="text-slate-500">Mode: </span>
-          {locationMode === 'mobile' ? 'Mobile — we come to you' : 'Drop-off — you bring it in'}
+          {locationMode === 'mobile'
+            ? 'Pickup — we’ll pick up your car'
+            : 'Drop-off — 504 Summit Ct, Jackson, MO'}
         </p>
         {locationMode === 'mobile' && address ? (
           <p className="mt-2 text-slate-400">

@@ -156,6 +156,12 @@ export default function BookingWizard() {
 
   const subFlowKey = `${selectedPackageId}:${vehicleType}`
 
+  const appliedLoyaltyDiscountPercent = useMemo(() => {
+    if (entryKind !== 'returning' || !loyaltySnapshot?.recognized) return 0
+    const p = loyaltySnapshot.nextDiscountPercent
+    return typeof p === 'number' && p > 0 ? p : 0
+  }, [entryKind, loyaltySnapshot])
+
   const hasCeramic = selectedAddonIds.includes(CERAMIC_ADDON_ID)
 
   const addAddon = useCallback((id: string) => {
@@ -261,7 +267,7 @@ export default function BookingWizard() {
         return 'No times available on this day — choose another date.'
       if (!hasCeramic && !preferredTimeSlot) return 'Choose a drop-off time (10 AM, 2 PM, or 4 PM).'
       if (locationMode === 'mobile' && !address.trim())
-        return 'Add a service address for mobile detailing.'
+        return 'Add a pickup address where we should get your vehicle.'
       if (!hasCeramic && preferredTimeSlot && slotAvailability) {
         const a = slotAvailability[preferredTimeSlot]
         if (a?.status === 'block') return 'That time is unavailable — pick another slot.'
@@ -591,7 +597,8 @@ export default function BookingWizard() {
                       <span className="font-semibold text-emerald-100">
                         {loyaltySnapshot.nextDiscountPercent}% off
                       </span>{' '}
-                      ({loyaltySnapshot.punchesOnCard}/{loyaltySnapshot.maxPunches} punches).
+                      on package & detail add-ons — premium Glow-ups full price (
+                      {loyaltySnapshot.punchesOnCard}/{loyaltySnapshot.maxPunches} punches).
                     </>
                   ) : (
                     <>
@@ -729,6 +736,7 @@ export default function BookingWizard() {
                 hasCeramicCoating={hasCeramic}
                 address={address}
                 parkingNotes={parkingNotes}
+                loyaltyDiscountPercent={appliedLoyaltyDiscountPercent}
               />
             ) : null}
           </motion.div>
@@ -742,6 +750,7 @@ export default function BookingWizard() {
               vehicleType={vehicleType}
               selectedPackageId={selectedPackageId}
               selectedAddonIds={selectedAddonIds}
+              loyaltyDiscountPercent={appliedLoyaltyDiscountPercent}
             />
           ) : null}
           <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:gap-3">

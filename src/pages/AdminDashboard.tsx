@@ -244,11 +244,8 @@ export function AdminDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [selectedBooking, setSelectedBooking] = useState<SelectedBooking | null>(null)
-  const [copyHint, setCopyHint] = useState<string | null>(null)
   const [headersBusy, setHeadersBusy] = useState(false)
   const [headersHint, setHeadersHint] = useState<string | null>(null)
-  const [backfillBusy, setBackfillBusy] = useState(false)
-  const [backfillHint, setBackfillHint] = useState<string | null>(null)
   /** Shown inside booking modal — global `error` sits under the modal and was invisible. */
   const [modalSheetError, setModalSheetError] = useState<string | null>(null)
   const [contactLookup, setContactLookup] = useState<{
@@ -331,7 +328,6 @@ export function AdminDashboard() {
   useEffect(() => {
     if (!selectedBooking) return
     setModalSheetError(null)
-    setBackfillHint(null)
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setSelectedBooking(null)
     }
@@ -460,43 +456,6 @@ export function AdminDashboard() {
     }
   }
 
-  async function logCalendarBookingToSheet() {
-    if (!selectedBooking) return
-    setBackfillBusy(true)
-    setBackfillHint(null)
-    setModalSheetError(null)
-    try {
-      const res = await fetch('/api/admin/append-submission-from-calendar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          date: selectedBooking.row.date,
-          label: selectedBooking.label,
-          slots: selectedBooking.slots,
-          phone: contactLookup.data?.phone,
-          email: contactLookup.data?.email,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const msg =
-          typeof data.error === 'string'
-            ? data.error
-            : res.status === 401
-              ? 'Not signed in — refresh the page and log in again.'
-              : res.statusText
-        throw new Error(msg)
-      }
-      setBackfillHint('Added a row on Submitted Requests (headers written if row 1 was empty).')
-      window.setTimeout(() => setBackfillHint(null), 6000)
-    } catch (e) {
-      setModalSheetError(e instanceof Error ? e.message : 'Could not add row')
-    } finally {
-      setBackfillBusy(false)
-    }
-  }
-
   async function writeSubmissionsHeaders() {
     setHeadersBusy(true)
     setHeadersHint(null)
@@ -518,18 +477,6 @@ export function AdminDashboard() {
       setError(e instanceof Error ? e.message : 'Could not write sheet headers')
     } finally {
       setHeadersBusy(false)
-    }
-  }
-
-  async function copyConfirmationMessage() {
-    if (!confirmationDraft) return
-    try {
-      await navigator.clipboard.writeText(confirmationDraft)
-      setCopyHint('Copied to clipboard')
-      window.setTimeout(() => setCopyHint(null), 2500)
-    } catch {
-      setCopyHint('Could not copy — select the text below and copy manually')
-      window.setTimeout(() => setCopyHint(null), 4000)
     }
   }
 
@@ -890,9 +837,8 @@ export function AdminDashboard() {
           {SLOT_KEYS.map((k) => `${labelPreferredTime(k)}`).join(' · ')}. “Clear” only removes empty or
           blockout cells; booked slots stay until edited in Sheets. New <strong className="text-slate-500">site</strong>{' '}
           bookings go to the <strong className="text-slate-500">Requests Queue</strong> tab until you accept (then
-          calendar + Submitted Requests). Open a cyan booking →{' '}
-          <strong className="text-slate-500">Log to Submitted Requests</strong> copies that calendar row into
-          the log. <strong className="text-slate-500">Sheet headers</strong> writes row 1 if needed.
+          the calendar updates and a row is added to <strong className="text-slate-500">Submitted Requests</strong>
+          ). <strong className="text-slate-500">Sheet headers</strong> writes row 1 if needed.
         </p>
 
         {selectedBooking && confirmationDraft ? (
@@ -963,8 +909,8 @@ export function AdminDashboard() {
                     ) : contactLookup.missing ? (
                       <span className="text-slate-300">
                         No matching Submitted Requests row yet (date + calendar note must match that sheet).
-                        Use &quot;Log to Submitted Requests&quot; below or book on the site. Typing a phone
-                        number only on the calendar tab does not store it for this lookup.
+                        Rows are added when a customer books on the site or when you accept a pending request
+                        from the queue. The calendar cell only holds the short note — not phone.
                       </span>
                     ) : (
                       '—'
@@ -990,7 +936,7 @@ export function AdminDashboard() {
                   <p className="mt-2 text-[11px] leading-snug text-slate-500">
                     Column titles for the log live in <span className="text-slate-400">server/index.mjs</span>{' '}
                     (<code className="rounded bg-white/5 px-1 text-[10px] text-slate-400">SUBMISSION_HEADERS</code>
-                    ). Row 1 of the sheet is filled when you use the buttons below or on new site bookings.
+                    ). Row 1 is written on new site bookings and when you accept a request from the queue.
                   </p>
                 </div>
                 {(() => {
@@ -1016,8 +962,9 @@ export function AdminDashboard() {
                   Message for your customer
                 </p>
                 <p className="mt-1 text-[11px] leading-snug text-slate-500 sm:text-xs">
-                  Confirms their date and thanks them for Jackson Auto Glow. On iPhone or Mac, Open in
-                  Messages drafts an SMS to their saved number.
+                  Confirms their date and thanks them for Jackson Auto Glow.{' '}
+                  <strong className="font-medium text-slate-400">Message</strong> opens your default texting
+                  app (e.g. Messages) with this draft to the phone number from their booking.
                 </p>
                 <textarea
                   readOnly
@@ -1025,9 +972,6 @@ export function AdminDashboard() {
                   rows={8}
                   className="mt-2 max-h-[40vh] w-full resize-y rounded-xl border border-white/10 bg-black/40 px-2.5 py-2 font-sans text-base leading-snug text-slate-200 outline-none focus:border-cyan-500/40 sm:max-h-none sm:px-3 sm:py-2.5 sm:text-sm sm:leading-relaxed"
                 />
-                {copyHint ? (
-                  <p className="mt-2 text-xs text-cyan-300/90">{copyHint}</p>
-                ) : null}
                 {modalSheetError ? (
                   <p
                     role="alert"
@@ -1036,41 +980,19 @@ export function AdminDashboard() {
                     {modalSheetError}
                   </p>
                 ) : null}
-                {backfillHint ? (
-                  <p className="mt-2 text-xs text-emerald-300/90">{backfillHint}</p>
-                ) : null}
                 <div className="mt-3 flex flex-col gap-2 sm:mt-4 sm:flex-row sm:flex-wrap sm:items-stretch">
-                  <button
-                    type="button"
-                    disabled={backfillBusy}
-                    onClick={() => void logCalendarBookingToSheet()}
-                    className="min-h-11 w-full rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/15 disabled:opacity-50 sm:order-first sm:w-auto sm:flex-1"
-                  >
-                    {backfillBusy ? 'Writing row…' : 'Log to Submitted Requests'}
-                  </button>
                   {messagesUrl ? (
                     <a
                       href={messagesUrl}
                       className="cta-gradient flex min-h-11 w-full items-center justify-center rounded-xl px-3 text-center text-sm font-semibold sm:min-h-11 sm:flex-1"
                     >
-                      Open in Messages
+                      Message
                     </a>
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => void copyConfirmationMessage()}
-                    className={`min-h-11 w-full rounded-xl border px-3 text-sm font-semibold sm:w-auto sm:flex-1 ${
-                      messagesUrl
-                        ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/15'
-                        : 'cta-gradient border-transparent'
-                    }`}
-                  >
-                    Copy message
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setSelectedBooking(null)}
-                    className="min-h-11 w-full rounded-xl border border-white/15 px-3 text-sm text-slate-300 hover:bg-white/5 sm:w-auto"
+                    className="min-h-11 w-full rounded-xl border border-white/15 px-3 text-sm text-slate-300 hover:bg-white/5 sm:w-auto sm:flex-1"
                   >
                     Close
                   </button>
@@ -1231,7 +1153,7 @@ export function AdminDashboard() {
                       className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/15 sm:flex-1"
                     >
                       <MessageSquare className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                      Text customer
+                      Message
                     </a>
                   ) : null}
                   <button

@@ -248,6 +248,9 @@ export const premiumUpsells: PremiumUpsell[] = [
   },
 ]
 
+/** Glow-up card addon IDs — punch-card % off applies to package + add-ons outside this set only. */
+export const PREMIUM_UPSELL_ADDON_ID_SET = new Set(premiumUpsells.map((u) => u.addonId))
+
 /** Premium-only addon not listed in main ala carte checklist */
 export const premiumOnlyAddons: Addon[] = [
   {
@@ -287,6 +290,7 @@ export function resolvePackagePrice(
       'suv-compact': 225,
       'suv-fullsize': 265,
       truck: 295,
+      minivan: 295,
     }
     return byClass[vehicleType]
   }

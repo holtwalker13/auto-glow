@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion'
-import { Car, Truck, CarFront, Bus } from 'lucide-react'
+import { Car, Truck, Van, CarFront, Bus } from 'lucide-react'
 import type { VehicleType } from '../types/request'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 
 const OPTIONS: { id: VehicleType; label: string; Icon: typeof Car }[] = [
   { id: 'car', label: 'Car', Icon: Car },
   { id: 'truck', label: 'Truck', Icon: Truck },
+  { id: 'minivan', label: 'Minivan', Icon: Van },
   { id: 'suv-compact', label: 'Compact SUV', Icon: CarFront },
   { id: 'suv-fullsize', label: 'Full-size SUV', Icon: Bus },
 ]
@@ -26,7 +27,7 @@ export function VehicleStep({
   return (
     <div className="space-y-6">
       <p className="text-sm text-slate-400">Tap the vehicle that matches yours.</p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
         {OPTIONS.map(({ id, label, Icon }) => {
           const selected = type === id
           return (

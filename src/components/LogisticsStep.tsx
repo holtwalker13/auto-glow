@@ -130,10 +130,10 @@ export function LogisticsStep({
             }`}
           >
             <span className="font-display text-base font-semibold italic text-white">
-              I come to you
+              We&apos;ll pick up your car
             </span>
             <span className="mt-1 block text-sm text-slate-400">
-              Mobile detailing at your home or work.
+              Add your pickup address below — we&apos;ll confirm details when we reach out.
             </span>
           </button>
           <button
@@ -146,10 +146,10 @@ export function LogisticsStep({
             }`}
           >
             <span className="font-display text-base font-semibold italic text-white">
-              You bring it to me
+              Drop it off at our location
             </span>
             <span className="mt-1 block text-sm text-slate-400">
-              Drop-off at our location.
+              Please drop off 5min before appointment at 504 Summit Ct in Jackson, MO
             </span>
           </button>
         </div>
@@ -159,12 +159,12 @@ export function LogisticsStep({
         <div className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-300" htmlFor="addr">
-              Service address
+              Pickup address
             </label>
             <input
               id="addr"
               className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/30"
-              placeholder="Street, city, ZIP"
+              placeholder="Where we should pick up your vehicle (street, city, ZIP)"
               value={address}
               onChange={(e) => onAddressChange(e.target.value)}
               autoComplete="street-address"

@@ -1,4 +1,4 @@
-export type VehicleType = 'car' | 'truck' | 'suv-compact' | 'suv-fullsize'
+export type VehicleType = 'car' | 'truck' | 'minivan' | 'suv-compact' | 'suv-fullsize'
 
 export type LocationMode = 'mobile' | 'shop'
 
@@ -18,6 +18,8 @@ export function labelVehicleType(t: VehicleType | ''): string {
       return 'Car'
     case 'truck':
       return 'Truck'
+    case 'minivan':
+      return 'Minivan'
     case 'suv-compact':
       return 'Compact SUV'
     case 'suv-fullsize':

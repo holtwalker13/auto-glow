@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"PORT=8788 node server/index.mjs\"",
+    "dev": "concurrently -k \"vite\" \"PORT=8788 node --watch server/index.mjs\"",
     "dev:client": "vite",
-    "dev:server": "node server/index.mjs",
+    "dev:server": "PORT=8788 node --watch server/index.mjs",
     "build": "tsc -b && vite build",
     "start": "NODE_ENV=production node server/index.mjs",
     "start:fresh": "npm run build && npm run start",
