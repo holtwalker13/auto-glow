@@ -1,16 +1,39 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Ban, Trash2, X } from 'lucide-react'
+import { Ban, MessageSquare, Trash2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   buildCustomerConfirmationMessage,
   parseCalendarBookingLabel,
 } from '../lib/adminConfirmationMessage'
 import { buildSmsMessagesUrl } from '../lib/smsHref'
+import { getAddonById } from '../data/services'
 import {
   PREFERRED_TIME_OPTIONS,
   labelPreferredTime,
   type PreferredTimeSlot,
 } from '../types/request'
+
+type QueuePendingItem = {
+  sheetRow: number
+  clientReferenceId: string
+  submittedAt: string
+  name: string
+  phone: string
+  email: string
+  preferredDate: string
+  timeSummary: string
+  fullDayCeramic: string
+  packageId: string
+  packageLabel: string
+  vehicleDescription: string
+  vehicleTypeLabel: string
+  selectedAddonIds: string[]
+  locationMode: string
+  address: string
+  parkingNotes: string
+  contactNotes: string
+  grandTotal: number | null | undefined
+}
 
 type SlotState = { status: string; label?: string }
 
@@ -41,7 +64,8 @@ function openBookingSelection(row: Row, slot: PreferredTimeSlot): SelectedBookin
 
 function slotStyle(s: SlotState | undefined) {
   if (!s || s.status === 'free') return 'bg-white/[0.04] text-slate-500'
-  if (s.status === 'block') return 'bg-amber-500/20 text-amber-100 border border-amber-500/40'
+  if (s.status === 'block')
+    return 'bg-amber-950/40 text-amber-200/70 border border-amber-800/30'
   return 'bg-cyan-500/15 text-cyan-100 border border-cyan-500/30'
 }
 
@@ -88,7 +112,7 @@ function SlotCell({
         : 'mt-1 flex flex-wrap gap-1'
   const actionBtnClass = compact
     ? 'min-h-10 flex-1 rounded-lg border px-3 text-xs font-medium disabled:opacity-40'
-    : 'rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100 hover:bg-amber-500/20 disabled:opacity-40'
+    : 'rounded-md border border-amber-800/35 bg-amber-950/30 px-2 py-0.5 text-[10px] text-amber-200/75 hover:bg-amber-950/45 disabled:opacity-40'
 
   const iconBtn =
     'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border disabled:opacity-40'
@@ -98,7 +122,7 @@ function SlotCell({
       return (
         <span className="flex min-h-[1em] items-center justify-center" aria-label="Blocked time">
           <X
-            className={compactRow ? 'h-5 w-5 text-amber-100' : compact ? 'h-6 w-6 text-amber-100' : 'h-4 w-4 text-amber-100'}
+            className={compactRow ? 'h-5 w-5 text-amber-200/75' : compact ? 'h-6 w-6 text-amber-200/75' : 'h-4 w-4 text-amber-200/75'}
             strokeWidth={2.5}
           />
         </span>
@@ -143,9 +167,9 @@ function SlotCell({
         onClick={() => void onSlotAction(r.date, slot, 'blockout')}
         className={
           compact && compactRow
-            ? `${iconBtn} border-amber-500/40 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25`
+            ? `${iconBtn} border-amber-800/40 bg-amber-950/35 text-amber-200/80 hover:bg-amber-950/50`
             : compact
-              ? `${actionBtnClass} flex items-center justify-center gap-1.5 border-amber-500/40 bg-amber-500/15 text-amber-100`
+              ? `${actionBtnClass} flex items-center justify-center gap-1.5 border-amber-800/40 bg-amber-950/35 text-amber-200/80`
               : actionBtnClass
         }
         aria-label="Block this slot"
@@ -234,21 +258,54 @@ export function AdminDashboard() {
     /** Log row matched date + label but Phone/Email columns are blank */
     rowWithoutContact: boolean
   }>({ loading: false, data: null, missing: false, rowWithoutContact: false })
+  const [queuePending, setQueuePending] = useState<QueuePendingItem[]>([])
+  const [queueError, setQueueError] = useState<string | null>(null)
+  const [selectedQueueItem, setSelectedQueueItem] = useState<QueuePendingItem | null>(null)
+  const [queueModalError, setQueueModalError] = useState<string | null>(null)
+  const [queueBusy, setQueueBusy] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setQueueError(null)
     try {
-      const res = await fetch('/api/admin/schedule', { credentials: 'include' })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        if (res.status === 401) {
+      const schedRes = await fetch('/api/admin/schedule', { credentials: 'include' })
+      const data = await schedRes.json().catch(() => ({}))
+      if (!schedRes.ok) {
+        if (schedRes.status === 401) {
           setLoggedIn(false)
+          setQueuePending([])
           return
         }
-        throw new Error(data.error || res.statusText)
+        throw new Error(data.error || schedRes.statusText)
       }
       setRows(Array.isArray(data.rows) ? data.rows : [])
+
+      if (typeof data.requestQueueError === 'string' && data.requestQueueError.trim()) {
+        setQueueError(data.requestQueueError.trim())
+        setQueuePending([])
+      } else if (Array.isArray(data.requestQueuePending)) {
+        setQueuePending(data.requestQueuePending as QueuePendingItem[])
+        setQueueError(null)
+      } else {
+        const queueRes = await fetch('/api/admin/queue', { credentials: 'include' })
+        const qd = await queueRes.json().catch(() => ({}))
+        if (!queueRes.ok) {
+          if (queueRes.status === 401) {
+            setLoggedIn(false)
+            setQueuePending([])
+            return
+          }
+          setQueueError(String(qd.error || `Could not load request queue (${queueRes.status})`))
+          setQueuePending([])
+        } else if (!Array.isArray(qd.pending)) {
+          setQueueError('Unexpected response from request queue.')
+          setQueuePending([])
+        } else {
+          setQueuePending(qd.pending as QueuePendingItem[])
+          setQueueError(null)
+        }
+      }
       setLoggedIn(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -281,6 +338,16 @@ export function AdminDashboard() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedBooking])
+
+  useEffect(() => {
+    if (!selectedQueueItem) return
+    setQueueModalError(null)
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedQueueItem(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedQueueItem])
 
   useEffect(() => {
     if (!selectedBooking) {
@@ -368,6 +435,8 @@ export function AdminDashboard() {
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' })
     setLoggedIn(false)
     setRows([])
+    setQueuePending([])
+    setQueueError(null)
   }
 
   async function slotAction(date: string, slot: PreferredTimeSlot | 'all', action: 'blockout' | 'clear') {
@@ -461,6 +530,56 @@ export function AdminDashboard() {
     } catch {
       setCopyHint('Could not copy — select the text below and copy manually')
       window.setTimeout(() => setCopyHint(null), 4000)
+    }
+  }
+
+  const queueSmsUrl = useMemo(() => {
+    if (!selectedQueueItem?.phone) return null
+    const body = `Hi ${selectedQueueItem.name || 'there'}, this is Jackson Auto Glow regarding your detail request for ${selectedQueueItem.preferredDate}. `
+    return buildSmsMessagesUrl(selectedQueueItem.phone, body)
+  }, [selectedQueueItem])
+
+  async function acceptQueueRequest(item: QueuePendingItem) {
+    const key = `accept-${item.clientReferenceId}`
+    setQueueBusy(key)
+    setQueueModalError(null)
+    try {
+      const res = await fetch('/api/admin/request-queue/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ clientReferenceId: item.clientReferenceId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || res.statusText)
+      setSelectedQueueItem(null)
+      await refresh()
+    } catch (e) {
+      setQueueModalError(e instanceof Error ? e.message : 'Accept failed')
+    } finally {
+      setQueueBusy(null)
+    }
+  }
+
+  async function declineQueueRequest(item: QueuePendingItem) {
+    const key = `decline-${item.clientReferenceId}`
+    setQueueBusy(key)
+    setQueueModalError(null)
+    try {
+      const res = await fetch('/api/admin/request-queue/decline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ clientReferenceId: item.clientReferenceId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || res.statusText)
+      setSelectedQueueItem(null)
+      await refresh()
+    } catch (e) {
+      setQueueModalError(e instanceof Error ? e.message : 'Decline failed')
+    } finally {
+      setQueueBusy(null)
     }
   }
 
@@ -575,6 +694,57 @@ export function AdminDashboard() {
           </p>
         ) : null}
 
+        <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+          <h2 className="font-display text-base font-bold italic text-slate-100 sm:text-lg">
+            Requests queue
+          </h2>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400 sm:text-sm">
+            Pending site requests are <strong className="text-slate-200">not</strong> on the calendar until
+            you accept them. Declining frees nothing on the sheet (they were never held). Accept reserves the
+            slot and logs Submitted Requests.
+          </p>
+          {queueError ? (
+            <p
+              role="alert"
+              className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+            >
+              {queueError}
+            </p>
+          ) : null}
+          {!queueError && queuePending.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">No pending requests.</p>
+          ) : !queueError ? (
+            <ul className="mt-4 space-y-2">
+              {queuePending.map((q) => (
+                <li key={q.clientReferenceId}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQueueModalError(null)
+                      setSelectedQueueItem(q)
+                    }}
+                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-left transition hover:border-cyan-500/25 hover:bg-black/50 sm:px-4"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-white">{q.name || 'Customer'}</p>
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        <span className="font-mono text-slate-500">{q.preferredDate}</span>
+                        <span className="mx-1.5 text-slate-600">·</span>
+                        {q.fullDayCeramic?.toLowerCase() === 'yes'
+                          ? 'Full day (ceramic)'
+                          : q.timeSummary || 'Time TBD'}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-cyan-950/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-200/85">
+                      Pending
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+
         <div className="mt-6">
           {/* Mobile: one card per day — no horizontal scroll */}
           <div className="space-y-3 md:hidden">
@@ -618,7 +788,7 @@ export function AdminDashboard() {
                       type="button"
                       disabled={busyKey !== null}
                       onClick={() => void slotAction(r.date, 'all', 'blockout')}
-                      className="min-h-10 flex-1 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2 text-xs font-medium text-amber-100 hover:bg-amber-500/25 disabled:opacity-40"
+                      className="min-h-10 flex-1 rounded-lg border border-amber-800/35 bg-amber-950/30 px-2 text-xs font-medium text-amber-200/80 hover:bg-amber-950/45 disabled:opacity-40"
                     >
                       Block all day
                     </button>
@@ -691,7 +861,7 @@ export function AdminDashboard() {
                             type="button"
                             disabled={busyKey !== null}
                             onClick={() => void slotAction(r.date, 'all', 'blockout')}
-                            className="rounded-lg border border-amber-500/40 bg-amber-500/15 px-2 py-1.5 text-[10px] font-medium text-amber-100 hover:bg-amber-500/25 disabled:opacity-40"
+                            className="rounded-lg border border-amber-800/35 bg-amber-950/30 px-2 py-1.5 text-[10px] font-medium text-amber-200/80 hover:bg-amber-950/45 disabled:opacity-40"
                           >
                             Block all day
                           </button>
@@ -718,10 +888,11 @@ export function AdminDashboard() {
         <p className="mt-6 text-xs leading-relaxed text-slate-600 sm:text-sm">
           <span className="hidden sm:inline">Legend: </span>
           {SLOT_KEYS.map((k) => `${labelPreferredTime(k)}`).join(' · ')}. “Clear” only removes empty or
-          blockout cells; booked slots stay until edited in Sheets. New bookings are logged to the Submitted
-          Requests tab. Open a cyan booking → <strong className="text-slate-500">Log to Submitted Requests</strong>{' '}
-          copies that calendar row into the log (e.g. Holt Walker). <strong className="text-slate-500">Sheet headers</strong>{' '}
-          writes row 1 if needed.
+          blockout cells; booked slots stay until edited in Sheets. New <strong className="text-slate-500">site</strong>{' '}
+          bookings go to the <strong className="text-slate-500">Requests Queue</strong> tab until you accept (then
+          calendar + Submitted Requests). Open a cyan booking →{' '}
+          <strong className="text-slate-500">Log to Submitted Requests</strong> copies that calendar row into
+          the log. <strong className="text-slate-500">Sheet headers</strong> writes row 1 if needed.
         </p>
 
         {selectedBooking && confirmationDraft ? (
@@ -784,13 +955,13 @@ export function AdminDashboard() {
                         {contactLookup.data.phone}
                       </a>
                     ) : contactLookup.rowWithoutContact ? (
-                      <span className="text-amber-200/90">
+                      <span className="text-slate-300">
                         Submitted Requests row exists for this booking, but column D (Phone) is empty. Add your
                         number there or in the site form next time — the Booking Calendar cell only holds the
                         short note (name/vehicle), not phone.
                       </span>
                     ) : contactLookup.missing ? (
-                      <span className="text-amber-200/90">
+                      <span className="text-slate-300">
                         No matching Submitted Requests row yet (date + calendar note must match that sheet).
                         Use &quot;Log to Submitted Requests&quot; below or book on the site. Typing a phone
                         number only on the calendar tab does not store it for this lookup.
@@ -905,6 +1076,203 @@ export function AdminDashboard() {
                   </button>
                 </div>
               </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {selectedQueueItem ? (
+          <div
+            className="fixed inset-0 z-50 overflow-y-auto bg-black/80"
+            role="presentation"
+            onClick={() => setSelectedQueueItem(null)}
+          >
+            <div className="flex min-h-[100dvh] min-h-screen items-center justify-center p-3 py-[max(0.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-4 sm:py-6">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="queue-modal-title"
+                className="my-auto w-full max-w-lg max-h-[min(88dvh,calc(100dvh-2rem))] overflow-y-auto overscroll-contain rounded-2xl border border-white/12 bg-zinc-950 p-4 shadow-2xl sm:max-h-[min(90vh,720px)] sm:p-5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <h2
+                    id="queue-modal-title"
+                    className="font-display text-base font-bold italic text-white sm:text-lg"
+                  >
+                    Pending request
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedQueueItem(null)}
+                    className="rounded-lg border border-white/10 p-2 text-slate-400 hover:bg-white/5 hover:text-white"
+                    aria-label="Close"
+                  >
+                    <X className="h-4 w-4" strokeWidth={2} />
+                  </button>
+                </div>
+
+                <dl className="mt-4 space-y-2.5 text-xs sm:text-sm">
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Name</dt>
+                    <dd className="mt-0.5 text-slate-200">{selectedQueueItem.name || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Phone</dt>
+                    <dd className="mt-0.5">
+                      {selectedQueueItem.phone ? (
+                        <a
+                          href={`tel:${selectedQueueItem.phone.replace(/\s/g, '')}`}
+                          className="text-cyan-300 underline-offset-2 hover:underline"
+                        >
+                          {selectedQueueItem.phone}
+                        </a>
+                      ) : (
+                        '—'
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Email</dt>
+                    <dd className="mt-0.5 break-all">
+                      {selectedQueueItem.email ? (
+                        <a
+                          href={`mailto:${selectedQueueItem.email}`}
+                          className="text-cyan-300 underline-offset-2 hover:underline"
+                        >
+                          {selectedQueueItem.email}
+                        </a>
+                      ) : (
+                        '—'
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Date & time</dt>
+                    <dd className="mt-0.5 text-slate-200">
+                      <span className="font-mono text-slate-400">{selectedQueueItem.preferredDate}</span>
+                      <span className="mx-1 text-slate-600">·</span>
+                      {selectedQueueItem.fullDayCeramic?.toLowerCase() === 'yes'
+                        ? 'Full day (ceramic)'
+                        : selectedQueueItem.timeSummary || '—'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Package</dt>
+                    <dd className="mt-0.5 text-slate-200">
+                      {selectedQueueItem.packageLabel || selectedQueueItem.packageId}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Vehicle</dt>
+                    <dd className="mt-0.5 text-slate-200">
+                      {selectedQueueItem.vehicleTypeLabel}
+                      {selectedQueueItem.vehicleDescription
+                        ? ` · ${selectedQueueItem.vehicleDescription}`
+                        : ''}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Location</dt>
+                    <dd className="mt-0.5 text-slate-200">
+                      {selectedQueueItem.locationMode === 'shop' ? 'Shop' : 'Mobile'}
+                      {selectedQueueItem.address ? ` · ${selectedQueueItem.address}` : ''}
+                    </dd>
+                  </div>
+                  {selectedQueueItem.parkingNotes ? (
+                    <div>
+                      <dt className="font-medium uppercase tracking-wider text-slate-500">Parking</dt>
+                      <dd className="mt-0.5 text-slate-300">{selectedQueueItem.parkingNotes}</dd>
+                    </div>
+                  ) : null}
+                  {selectedQueueItem.contactNotes ? (
+                    <div>
+                      <dt className="font-medium uppercase tracking-wider text-slate-500">Notes</dt>
+                      <dd className="mt-0.5 text-slate-300">{selectedQueueItem.contactNotes}</dd>
+                    </div>
+                  ) : null}
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Add-ons</dt>
+                    <dd className="mt-0.5 text-slate-300">
+                      {selectedQueueItem.selectedAddonIds.length === 0
+                        ? 'None'
+                        : selectedQueueItem.selectedAddonIds
+                            .map((id) => getAddonById(id)?.name ?? id)
+                            .join(' · ')}
+                    </dd>
+                  </div>
+                  {selectedQueueItem.grandTotal != null ? (
+                    <div>
+                      <dt className="font-medium uppercase tracking-wider text-slate-500">Est. total</dt>
+                      <dd className="mt-0.5 text-slate-200">${selectedQueueItem.grandTotal}</dd>
+                    </div>
+                  ) : null}
+                  <div>
+                    <dt className="font-medium uppercase tracking-wider text-slate-500">Reference</dt>
+                    <dd className="mt-0.5 font-mono text-[11px] text-slate-500">
+                      {selectedQueueItem.clientReferenceId}
+                    </dd>
+                  </div>
+                </dl>
+
+                {queueModalError ? (
+                  <p
+                    role="alert"
+                    className="mt-4 rounded-lg border border-red-500/35 bg-red-500/10 px-2.5 py-2 text-xs text-red-100"
+                  >
+                    {queueModalError}
+                  </p>
+                ) : null}
+
+                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  {queueSmsUrl ? (
+                    <a
+                      href={queueSmsUrl}
+                      className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/15 sm:flex-1"
+                    >
+                      <MessageSquare className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                      Text customer
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={queueBusy !== null}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          'Accept this booking? The calendar will be updated and a row will be added to Submitted Requests.',
+                        )
+                      )
+                        return
+                      void acceptQueueRequest(selectedQueueItem)
+                    }}
+                    className="min-h-11 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-50 sm:flex-1"
+                  >
+                    {queueBusy === `accept-${selectedQueueItem.clientReferenceId}`
+                      ? 'Accepting…'
+                      : 'Accept booking'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={queueBusy !== null}
+                    onClick={() => {
+                      if (!window.confirm('Decline this request? The calendar will not change.')) return
+                      void declineQueueRequest(selectedQueueItem)
+                    }}
+                    className="min-h-11 rounded-xl border border-red-500/35 bg-red-500/10 px-3 text-sm font-semibold text-red-100 hover:bg-red-500/20 disabled:opacity-50 sm:flex-1"
+                  >
+                    {queueBusy === `decline-${selectedQueueItem.clientReferenceId}`
+                      ? 'Declining…'
+                      : 'Decline'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedQueueItem(null)}
+                    className="min-h-11 rounded-xl border border-white/15 px-3 text-sm text-slate-300 hover:bg-white/5 sm:w-full sm:flex-none"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>

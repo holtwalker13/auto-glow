@@ -102,6 +102,23 @@ export const packages: ServicePackage[] = [
     ],
     intro: 'Our Full Detail includes the following:',
   },
+  {
+    id: 'full-everything',
+    name: 'Full Everything',
+    tagline: 'Maximum glow — bundled interior, exterior & curated extras',
+    price: 700,
+    sections: [
+      {
+        title: 'The works',
+        items: [
+          'Full interior and exterior detail baseline',
+          'Curated add-ons bundled into one simple price',
+          'Best value when you were stacking multiple upgrades',
+        ],
+      },
+    ],
+    intro: 'One package when you want it all handled together.',
+  },
 ]
 
 export const addons: Addon[] = [
@@ -117,6 +134,37 @@ export const addons: Addon[] = [
   { id: 'addon-headlight', name: 'Headlight restoration (pair)', price: 99 },
   { id: 'addon-odor', name: 'Odor treatment (fogger / ozone-style)', price: 95 },
 ]
+
+/** Quick-pick extras after package (not the premium Glow-up cards). */
+export const subAddonsExterior: Addon[] = [
+  { id: 'addon-sub-engine', name: 'Engine bay detail', price: 85 },
+  { id: 'addon-sub-trim', name: 'Trim restoration', price: 75 },
+  { id: 'addon-sub-tar-bug', name: 'Tar & bug removal', price: 65 },
+]
+
+export const subAddonsInterior: Addon[] = [
+  { id: 'addon-sub-leather', name: 'Leather conditioner', price: 45 },
+  { id: 'addon-sub-seat-shampoo', name: 'Seat shampoo', price: 55 },
+  { id: 'addon-sub-carpet-shampoo', name: 'Carpet shampoo', price: 55 },
+  { id: 'addon-sub-pet-hair', name: 'Pet hair removal', price: 55 },
+]
+
+const SUB_ADDON_LIST = [...subAddonsExterior, ...subAddonsInterior]
+
+export const SUB_ADDON_ID_SET = new Set(SUB_ADDON_LIST.map((a) => a.id))
+
+export function getSubAddonsForPackage(packageId: string): Addon[] {
+  if (packageId === 'exterior-detail') return [...subAddonsExterior]
+  if (packageId === 'interior-detail') return [...subAddonsInterior]
+  if (packageId === 'full-detail' || packageId === 'full-everything') {
+    return [...subAddonsExterior, ...subAddonsInterior]
+  }
+  return []
+}
+
+export function packageUsesTwoPhaseSubAddons(packageId: string): boolean {
+  return packageId === 'full-detail' || packageId === 'full-everything'
+}
 
 export const premiumUpsells: PremiumUpsell[] = [
   {
@@ -212,7 +260,9 @@ export const premiumOnlyAddons: Addon[] = [
 
 export function getAddonById(id: string): Addon | undefined {
   return (
-    addons.find((a) => a.id === id) ?? premiumOnlyAddons.find((a) => a.id === id)
+    addons.find((a) => a.id === id) ??
+    premiumOnlyAddons.find((a) => a.id === id) ??
+    SUB_ADDON_LIST.find((a) => a.id === id)
   )
 }
 
@@ -227,6 +277,9 @@ export function resolvePackagePrice(
 ): number | null {
   const pkg = getPackageById(packageId)
   if (!pkg) return null
+  if (packageId === 'full-everything') {
+    return 700
+  }
   if (packageId === 'full-detail') {
     if (!vehicleType) return null
     const byClass: Record<VehicleType, number> = {

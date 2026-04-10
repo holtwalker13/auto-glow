@@ -4,9 +4,11 @@ import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 
 export function SuccessScreen({
   payload,
+  pendingInQueue = false,
   onStartNew,
 }: {
   payload: RequestPayload
+  pendingInQueue?: boolean
   onStartNew: () => void
 }) {
   const reduce = usePrefersReducedMotion()
@@ -46,8 +48,16 @@ export function SuccessScreen({
         Request received
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-slate-400">
-        Thanks for choosing Jackson Auto Glow. We’ll reach out to confirm your date, location, and
-        any final details.
+        Thanks for choosing Jackson Auto Glow.
+        {pendingInQueue ? (
+          <>
+            {' '}
+            Your request is in our queue — we’ll confirm your date and time before anything is added
+            to the calendar.
+          </>
+        ) : (
+          <> We’ll reach out to confirm your date, location, and any final details.</>
+        )}
       </p>
 
       <div className="mt-8 w-full rounded-2xl border border-cyan-500/20 bg-white/[0.04] p-4 text-left">

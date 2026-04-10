@@ -29,6 +29,18 @@ function resolveServerDirname() {
 
 const __dirname = resolveServerDirname()
 
+/** True when this file is the Node entrypoint (not when imported by e.g. `scripts/*.mjs`). */
+function isExecutedDirectly() {
+  try {
+    const entry = process.argv[1]
+    if (!entry) return false
+    const thisFile = fileURLToPath(import.meta.url)
+    return path.resolve(entry) === path.resolve(thisFile)
+  } catch {
+    return false
+  }
+}
+
 // Lambda / Vercel: env comes from the host; no .env file on disk.
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME && !process.env.VERCEL) {
   dotenv.config({ path: path.join(__dirname, '..', '.env') })
@@ -40,13 +52,28 @@ const HEADER_ROW_COUNT = Math.max(0, parseInt(process.env.GOOGLE_SHEETS_HEADER_R
 /** Full form submissions log (same spreadsheet). Default tab name matches typical sheet title. */
 const SUBMISSIONS_TAB = (process.env.GOOGLE_SHEETS_SUBMISSIONS_TAB || 'Submitted Requests').trim()
 const SUBMISSIONS_HEADER_ROWS = Math.max(0, parseInt(process.env.GOOGLE_SHEETS_SUBMISSIONS_HEADER_ROWS || '1', 10))
+/** Pending customer requests (same columns as submissions + Status). Worksheet is auto-created if missing. */
+const REQUEST_QUEUE_TAB = (process.env.GOOGLE_SHEETS_REQUEST_QUEUE_TAB || 'Requests Queue').trim()
+/** Queue tab always has a single header row (A1:AB1), independent of Submitted Requests header count. */
+const REQUEST_QUEUE_HEADER_ROWS = 1
 
 /** Column index (0-based) for admin phone lookup */
+const SUB_COL_REF = 1
 const SUB_COL_DATE = 17
 const SUB_COL_CALENDAR_LABEL = 24
 const SUB_COL_PHONE = 3
 const SUB_COL_EMAIL = 4
 const SUB_COL_NAME = 2
+const SUB_COL_PACKAGE_ID = 8
+const SUB_COL_TIME_LABEL = 18
+const SUB_COL_FULL_DAY = 19
+const SUB_COL_LOCATION = 20
+const SUB_COL_ADDRESS = 21
+const SUB_COL_PARKING = 22
+const SUB_COL_NOTES = 23
+const SUB_COL_DISMISSED = 25
+const SUB_COL_ADDON_IDS_RAW = 26
+const SUB_COL_STATUS = 27
 
 /** Row 1 on Submitted Requests — written by ensure/write endpoints and before each append. */
 const SUBMISSION_HEADERS = [
@@ -79,6 +106,8 @@ const SUBMISSION_HEADERS = [
   'Selected Addon IDs (raw)',
 ]
 
+const QUEUE_HEADERS = [...SUBMISSION_HEADERS, 'Status']
+
 const VEHICLE_TYPE_LABELS = {
   car: 'Car',
   truck: 'Truck',
@@ -98,12 +127,20 @@ const ADDON_META = {
   'addon-headlight': { name: 'Headlight restoration (pair)', price: 99 },
   'addon-odor': { name: 'Odor treatment', price: 95 },
   'addon-ceramic-3yr': { name: 'Ceramic coating (3-year)', price: 899 },
+  'addon-sub-engine': { name: 'Engine bay detail', price: 85 },
+  'addon-sub-trim': { name: 'Trim restoration', price: 75 },
+  'addon-sub-tar-bug': { name: 'Tar & bug removal', price: 65 },
+  'addon-sub-leather': { name: 'Leather conditioner', price: 45 },
+  'addon-sub-seat-shampoo': { name: 'Seat shampoo', price: 55 },
+  'addon-sub-carpet-shampoo': { name: 'Carpet shampoo', price: 55 },
+  'addon-sub-pet-hair': { name: 'Pet hair removal', price: 55 },
 }
 
 const PACKAGE_NAMES = {
   'interior-detail': 'Interior Detail',
   'exterior-detail': 'Exterior Detail',
   'full-detail': 'Full Detail',
+  'full-everything': 'Full Everything',
 }
 const COOKIE_SECRET = process.env.SESSION_COOKIE_SECRET || 'change-me-set-SESSION_COOKIE_SECRET'
 const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || '').trim()
@@ -126,7 +163,31 @@ const NETLIFY_API_ROOT_SEGMENTS = new Set([
   'calendar',
   'availability',
   'health',
+  'loyalty',
 ])
+
+/** Package IDs that count as one punch on the detail loyalty card (Submitted Requests). */
+const LOYALTY_PUNCH_PACKAGE_IDS = new Set([
+  'full-detail',
+  'full-everything',
+  'interior-detail',
+  'exterior-detail',
+])
+
+const LOYALTY_MAX_PUNCHES = 5
+
+/** Next-visit discount % after `completedPunches` detail jobs logged in Submitted Requests (0 = regular price). */
+function loyaltyNextDiscountPercent(completedPunches) {
+  const n = Math.max(0, completedPunches)
+  const tier = [0, 20, 30, 40, 50]
+  return tier[Math.min(n, tier.length - 1)]
+}
+
+function phoneDigitsKey(s) {
+  const d = String(s ?? '').replace(/\D/g, '')
+  if (d.length >= 10) return d.slice(-10)
+  return d
+}
 
 /**
  * Netlify rewrites `/api/*` → `/.netlify/functions/api/:splat`. The Lambda event often uses
@@ -656,6 +717,75 @@ function formatGoogleSheetsError(err) {
 }
 
 /** Write data on the next empty row (more reliable than values.append on some sheets). */
+async function readSubmittedRequestsValues(sheets) {
+  await ensureSubmittedRequestsHeaders(sheets)
+  const safeSub = SUBMISSIONS_TAB.replace(/'/g, "''")
+  const read = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${safeSub}'!A:AA`,
+  })
+  return read.data.values || []
+}
+
+/**
+ * @returns {{ anyRow: boolean, completedPunches: number, lastName: string, lastEmail: string }}
+ */
+function loyaltySummarizeFromSubmittedRows(values, phoneKey) {
+  let anyRow = false
+  let completedPunches = 0
+  let lastName = ''
+  let lastEmail = ''
+  for (let i = SUBMISSIONS_HEADER_ROWS; i < values.length; i++) {
+    const row = values[i]
+    if (!row) continue
+    const rowPhone = phoneDigitsKey(row[SUB_COL_PHONE])
+    if (rowPhone.length < 7 || rowPhone !== phoneKey) continue
+    anyRow = true
+    const pkgId = String(row[SUB_COL_PACKAGE_ID] ?? '').trim()
+    if (LOYALTY_PUNCH_PACKAGE_IDS.has(pkgId)) {
+      completedPunches += 1
+    }
+  }
+  for (let i = values.length - 1; i >= SUBMISSIONS_HEADER_ROWS; i--) {
+    const row = values[i]
+    if (!row) continue
+    const rowPhone = phoneDigitsKey(row[SUB_COL_PHONE])
+    if (rowPhone.length < 7 || rowPhone !== phoneKey) continue
+    const name = String(row[SUB_COL_NAME] ?? '').trim()
+    const email = String(row[SUB_COL_EMAIL] ?? '').trim()
+    if (name || email) {
+      lastName = name
+      lastEmail = email
+      break
+    }
+  }
+  return { anyRow, completedPunches, lastName, lastEmail }
+}
+
+function loyaltyFirstNameFromFullName(fullName) {
+  const s = String(fullName ?? '').trim()
+  if (!s) return ''
+  const first = s.split(/\s+/).filter(Boolean)[0] ?? ''
+  if (!first) return ''
+  const stripped = first.replace(/^[^A-Za-z]+/, '')
+  return stripped || first
+}
+
+function loyaltyCelebrationMessage(anyRow, completedPunches, nextDiscountPercent, firstName) {
+  if (!anyRow) {
+    return 'We could not find this number in our completed job history yet. You can still book — we will use the phone number you entered.'
+  }
+  if (completedPunches === 0) {
+    const lead = firstName ? `Welcome back, ${firstName}. ` : ''
+    return `${lead}You're in our records. Book a Full, Interior, Exterior, or Full Everything detail to start your punch card. Your next detail is regular price until then.`
+  }
+  if (nextDiscountPercent <= 0) return ''
+  if (firstName) {
+    return `Congratulations, ${firstName} — you've unlocked ${nextDiscountPercent}% off your next wash or detail.`
+  }
+  return `Congratulations — you've unlocked ${nextDiscountPercent}% off your next wash or detail.`
+}
+
 async function appendSubmittedRequestsDataRow(sheets, dataRow) {
   const safeSub = SUBMISSIONS_TAB.replace(/'/g, "''")
   await ensureSubmittedRequestsHeaders(sheets)
@@ -695,6 +825,305 @@ async function ensureSubmittedRequestsHeaders(sheets) {
     /* tab may be missing until first successful write */
   }
   await writeSubmittedRequestsHeaderRow(sheets)
+}
+
+async function writeRequestQueueHeaderRow(sheets) {
+  const safe = REQUEST_QUEUE_TAB.replace(/'/g, "''")
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${safe}'!A1:AB1`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [QUEUE_HEADERS] },
+  })
+}
+
+async function requestQueueWorksheetTitles(sheets) {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: 'sheets.properties.title',
+  })
+  return (meta.data.sheets || []).map((s) => s.properties?.title).filter(Boolean)
+}
+
+/** Creates the queue worksheet if it is missing (no manual tab setup). */
+async function ensureRequestQueueWorksheetExists(sheets) {
+  if ((await requestQueueWorksheetTitles(sheets)).includes(REQUEST_QUEUE_TAB)) return
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: REQUEST_QUEUE_TAB } } }],
+      },
+    })
+    console.log(`[auto-glow] Created worksheet "${REQUEST_QUEUE_TAB}"`)
+  } catch (err) {
+    if ((await requestQueueWorksheetTitles(sheets)).includes(REQUEST_QUEUE_TAB)) return
+    throw err
+  }
+}
+
+/**
+ * Ensures the Requests Queue tab exists and row 1 has the canonical headers (A–AB) when A1 is wrong/empty.
+ * Called automatically before any queue read or append — no manual tab or header row setup.
+ */
+async function provisionRequestQueueSheet(sheets) {
+  await ensureRequestQueueWorksheetExists(sheets)
+  const safe = REQUEST_QUEUE_TAB.replace(/'/g, "''")
+  const r = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${safe}'!A1:A1`,
+  })
+  const first = String(r.data.values?.[0]?.[0] ?? '').trim()
+  if (first !== QUEUE_HEADERS[0]) {
+    await writeRequestQueueHeaderRow(sheets)
+  }
+}
+
+async function appendRequestQueueDataRow(sheets, dataRowWithStatus) {
+  const safeQ = REQUEST_QUEUE_TAB.replace(/'/g, "''")
+  await provisionRequestQueueSheet(sheets)
+  const colA = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${safeQ}'!A:A`,
+  })
+  const vals = colA.data.values || []
+  const nextRow = Math.max(vals.length, 1) + 1
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${safeQ}'!A${nextRow}:AB${nextRow}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [dataRowWithStatus] },
+  })
+}
+
+async function readRequestQueueValues(sheets) {
+  await provisionRequestQueueSheet(sheets)
+  const safeQ = REQUEST_QUEUE_TAB.replace(/'/g, "''")
+  try {
+    const read = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `'${safeQ}'!A:AB`,
+    })
+    return read.data.values || []
+  } catch (err) {
+    const hint = formatGoogleSheetsError(err) || err.message
+    console.error('[auto-glow] readRequestQueueValues:', hint)
+    throw new Error(
+      `Could not read Requests Queue ("${REQUEST_QUEUE_TAB}"). Check spreadsheet ID and that the service account can edit the file. ${hint}`,
+    )
+  }
+}
+
+function findQueueRowIndexByRef(values, clientReferenceId) {
+  const ref = String(clientReferenceId ?? '').trim()
+  if (!ref) return -1
+  for (let i = values.length - 1; i >= REQUEST_QUEUE_HEADER_ROWS; i--) {
+    const row = values[i]
+    if (!row) continue
+    if (String(row[SUB_COL_REF] ?? '').trim() === ref) return i
+  }
+  return -1
+}
+
+/** Pending rows for admin UI (same shape as GET /api/admin/request-queue). */
+async function loadPendingRequestQueueForAdmin(sheets) {
+  const values = await readRequestQueueValues(sheets)
+  const pending = []
+  for (let i = REQUEST_QUEUE_HEADER_ROWS; i < values.length; i++) {
+    const row = values[i]
+    if (!row) continue
+    const status = String(row[SUB_COL_STATUS] ?? '').trim() || 'Pending'
+    if (status.toLowerCase() !== 'pending') continue
+    try {
+      const body = bookingBodyFromSubmissionRow(row)
+      pending.push({
+        sheetRow: i + 1,
+        clientReferenceId: body.clientReferenceId,
+        submittedAt: String(row[0] ?? '').trim(),
+        name: body.contact.name,
+        phone: body.contact.phone,
+        email: body.contact.email,
+        preferredDate: body.preferredDate,
+        timeSummary: String(row[SUB_COL_TIME_LABEL] ?? '').trim(),
+        fullDayCeramic: String(row[SUB_COL_FULL_DAY] ?? '').trim(),
+        packageId: body.selectedPackageId,
+        packageLabel: String(row[7] ?? '').trim(),
+        vehicleDescription: body.vehicle.description,
+        vehicleTypeLabel: String(row[5] ?? '').trim(),
+        selectedAddonIds: body.selectedAddonIds,
+        locationMode: body.locationMode,
+        address: body.address,
+        parkingNotes: body.parkingNotes,
+        contactNotes: body.contact.notes,
+        grandTotal: body.totals?.grandTotal,
+      })
+    } catch (rowErr) {
+      console.error('[auto-glow] request-queue skip row', i + 1, rowErr)
+    }
+  }
+  return { tab: REQUEST_QUEUE_TAB, pending }
+}
+
+async function updateQueueRowStatus(sheets, clientReferenceId, status) {
+  const values = await readRequestQueueValues(sheets)
+  const idx = findQueueRowIndexByRef(values, clientReferenceId)
+  if (idx < 0) return { ok: false, error: 'Queue row not found' }
+  const sheetRow = idx + 1
+  const safeQ = REQUEST_QUEUE_TAB.replace(/'/g, "''")
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${safeQ}'!AB${sheetRow}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[status]] },
+  })
+  return { ok: true, sheetRow }
+}
+
+/** Reverse VEHICLE_TYPE_LABELS for sheet "Car" -> car */
+const VEHICLE_LABEL_TO_TYPE = Object.fromEntries(
+  Object.entries(VEHICLE_TYPE_LABELS).map(([k, v]) => [v, k]),
+)
+
+const TIME_LABEL_TO_SLOT = {
+  '10 AM': '10:00',
+  '2 PM': '14:00',
+  '4 PM': '16:00',
+}
+
+function resolvePackagePriceServer(packageId, vehicleType) {
+  if (packageId === 'full-everything') return 700
+  const pkgName = PACKAGE_NAMES[packageId]
+  if (!pkgName) return null
+  if (packageId === 'full-detail') {
+    if (!vehicleType || !VEHICLE_TYPE_LABELS[vehicleType]) return null
+    const byClass = { car: 225, 'suv-compact': 225, 'suv-fullsize': 265, truck: 295 }
+    return byClass[vehicleType] ?? null
+  }
+  if (packageId === 'interior-detail') return 120
+  if (packageId === 'exterior-detail') return 200
+  return null
+}
+
+function recomputeTotalsOnBody(body) {
+  const pkgId = body.selectedPackageId
+  const vehicleType = body.vehicle?.type
+  const packagePrice = resolvePackagePriceServer(pkgId, vehicleType)
+  const ids = Array.isArray(body.selectedAddonIds) ? body.selectedAddonIds : []
+  let addonsTotal = 0
+  for (const id of ids) {
+    addonsTotal += ADDON_META[id]?.price ?? 0
+  }
+  const grand = packagePrice != null ? packagePrice + addonsTotal : null
+  const pkgLabel = PACKAGE_NAMES[pkgId] || pkgId
+  body.totals = {
+    packageLine: { label: pkgLabel, amount: packagePrice },
+    addonsLine: { label: 'Add-ons', amount: addonsTotal },
+    grandTotal: grand,
+  }
+}
+
+/**
+ * Rebuild a booking-shaped body from a Requests Queue / Submitted Requests row (A–AA).
+ */
+function bookingBodyFromSubmissionRow(row) {
+  const pkgId = String(row[SUB_COL_PACKAGE_ID] ?? '').trim()
+  const addonRaw = String(row[SUB_COL_ADDON_IDS_RAW] ?? '').trim()
+  const selectedAddonIds = addonRaw
+    ? addonRaw
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : []
+  const dateISO =
+    submissionPreferredDateToISO(row[SUB_COL_DATE]) || String(row[SUB_COL_DATE] ?? '').trim()
+  const fullDay = String(row[SUB_COL_FULL_DAY] ?? '').trim().toLowerCase() === 'yes'
+  const timeLabel = String(row[SUB_COL_TIME_LABEL] ?? '').trim()
+  let preferredTimeSlot = '10:00'
+  if (!fullDay) {
+    preferredTimeSlot = TIME_LABEL_TO_SLOT[timeLabel] || ''
+  }
+  const loc = String(row[SUB_COL_LOCATION] ?? '').trim()
+  const locationMode = loc.startsWith('Shop') ? 'shop' : 'mobile'
+  const vtLabel = String(row[5] ?? '').trim()
+  const vehicleType = VEHICLE_LABEL_TO_TYPE[vtLabel] || 'car'
+
+  const dismissedRaw = String(row[SUB_COL_DISMISSED] ?? '').trim()
+  const dismissedPremiumIds = dismissedRaw
+    ? dismissedRaw.split(/\s*\|\s*/).map((s) => s.trim()).filter(Boolean)
+    : []
+
+  const body = {
+    clientReferenceId: String(row[SUB_COL_REF] ?? '').trim(),
+    contact: {
+      name: String(row[SUB_COL_NAME] ?? '').trim(),
+      phone: String(row[SUB_COL_PHONE] ?? '').trim(),
+      email: String(row[SUB_COL_EMAIL] ?? '').trim(),
+      notes: String(row[SUB_COL_NOTES] ?? '').trim(),
+    },
+    vehicle: {
+      type: vehicleType,
+      description: String(row[6] ?? '').trim(),
+    },
+    selectedPackageId: pkgId,
+    selectedAddonIds,
+    dismissedPremiumIds,
+    locationMode,
+    preferredDate: dateISO,
+    preferredTimeSlot,
+    address: String(row[SUB_COL_ADDRESS] ?? '').trim(),
+    parkingNotes: String(row[SUB_COL_PARKING] ?? '').trim(),
+  }
+  recomputeTotalsOnBody(body)
+  return body
+}
+
+/**
+ * Reserve calendar cells + append Submitted Requests. Rolls back calendar if log fails.
+ * @returns {{ ok: true, row, date: dateISO, slots } | { ok: false, status, error }}
+ */
+async function confirmBookingOnCalendar(sheets, body) {
+  const dateISO = normalizeToISODate(body.preferredDate)
+  if (!dateISO) return { ok: false, status: 400, error: 'Invalid preferredDate' }
+  const toReserve = slotsToReserve(body)
+  if (!toReserve) return { ok: false, status: 400, error: 'Invalid or missing preferredTimeSlot' }
+
+  const calRow = await findOrCreateDateRow(sheets, dateISO)
+  const rows = await readCalendarRows(sheets)
+  const parsed = parseRows(rows)
+  const snap = parsed.find((p) => p.row === calRow && p.dateISO === dateISO)
+  if (!snap) return { ok: false, status: 500, error: 'Row sync failed' }
+
+  if (!canOccupy(snap.cells, toReserve)) {
+    return { ok: false, status: 409, error: 'Selected slot(s) are no longer available.' }
+  }
+
+  const label = bookingLabelFromPayload(body)
+  const updates = toReserve.map((slot) => ({ col: colForSlot(slot), value: label }))
+  await updateCells(sheets, calRow, updates)
+
+  try {
+    const dataRow = buildSubmissionDataRow(body, label)
+    await appendSubmittedRequestsDataRow(sheets, dataRow)
+  } catch (logErr) {
+    console.error(
+      '[auto-glow] Submitted Requests write failed; rolling back calendar slots:',
+      formatGoogleSheetsError(logErr),
+    )
+    try {
+      const clearUpdates = toReserve.map((slot) => ({ col: colForSlot(slot), value: '' }))
+      await updateCells(sheets, calRow, clearUpdates)
+    } catch (rollbackErr) {
+      console.error('[auto-glow] Calendar rollback failed — fix sheet manually:', rollbackErr)
+    }
+    return {
+      ok: false,
+      status: 503,
+      error:
+        'Could not save to Submitted Requests; calendar was not updated. Try again or fix the sheet.',
+    }
+  }
+
+  return { ok: true, row: calRow, date: dateISO, slots: toReserve }
 }
 
 function slotsToReserve(body) {
@@ -778,6 +1207,54 @@ function createApp() {
     }
   })
 
+  app.post('/api/loyalty/lookup', async (req, res) => {
+    try {
+      assertSheetsEnv()
+    } catch (e) {
+      return res.status(e.status || 500).json({ error: e.message })
+    }
+    const rawPhone = typeof req.body?.phone === 'string' ? req.body.phone : ''
+    const phoneKey = phoneDigitsKey(rawPhone)
+    if (phoneKey.length < 7) {
+      return res.status(400).json({ error: 'Enter a valid phone number (at least 7 digits).' })
+    }
+    try {
+      const sheets = await getSheets()
+      const values = await readSubmittedRequestsValues(sheets)
+      const { anyRow, completedPunches, lastName, lastEmail } = loyaltySummarizeFromSubmittedRows(
+        values,
+        phoneKey,
+      )
+      const firstName = loyaltyFirstNameFromFullName(lastName)
+      const punchesOnCard = Math.min(completedPunches, LOYALTY_MAX_PUNCHES)
+      const nextDiscountPercent = loyaltyNextDiscountPercent(completedPunches)
+      const message = loyaltyCelebrationMessage(
+        anyRow,
+        completedPunches,
+        nextDiscountPercent,
+        firstName,
+      )
+      return res.json({
+        recognized: anyRow,
+        completedPunches,
+        punchesOnCard,
+        maxPunches: LOYALTY_MAX_PUNCHES,
+        nextDiscountPercent,
+        firstName,
+        /** Labels for the five milestones (visit pricing / reward ladder). */
+        tierLabels: ['Regular price', '20% off', '30% off', '40% off', '50% off'],
+        message,
+        contactHint: {
+          name: lastName,
+          email: lastEmail,
+        },
+      })
+    } catch (err) {
+      console.error(err)
+      return res.status(500).json({ error: err.message || 'Loyalty lookup failed' })
+    }
+  })
+
   app.get('/api/calendar', async (req, res) => {
     try {
       assertSheetsEnv()
@@ -854,10 +1331,10 @@ function createApp() {
 
     try {
       const sheets = await getSheets()
-      const row = await findOrCreateDateRow(sheets, dateISO)
+      const calRow = await findOrCreateDateRow(sheets, dateISO)
       const rows = await readCalendarRows(sheets)
       const parsed = parseRows(rows)
-      const snap = parsed.find((p) => p.row === row && p.dateISO === dateISO)
+      const snap = parsed.find((p) => p.row === calRow && p.dateISO === dateISO)
       if (!snap) return res.status(500).json({ error: 'Row sync failed' })
 
       if (!canOccupy(snap.cells, toReserve)) {
@@ -865,30 +1342,25 @@ function createApp() {
       }
 
       const label = bookingLabelFromPayload(body)
-      const updates = toReserve.map((slot) => ({ col: colForSlot(slot), value: label }))
-      await updateCells(sheets, row, updates)
-
+      const baseRow = buildSubmissionDataRow(body, label)
       try {
-        const dataRow = buildSubmissionDataRow(body, label)
-        await appendSubmittedRequestsDataRow(sheets, dataRow)
+        await appendRequestQueueDataRow(sheets, [...baseRow, 'Pending'])
       } catch (logErr) {
-        console.error(
-          '[auto-glow] Submitted Requests write failed; rolling back calendar slots:',
-          formatGoogleSheetsError(logErr),
-        )
-        try {
-          const clearUpdates = toReserve.map((slot) => ({ col: colForSlot(slot), value: '' }))
-          await updateCells(sheets, row, clearUpdates)
-        } catch (rollbackErr) {
-          console.error('[auto-glow] Calendar rollback failed — fix sheet manually:', rollbackErr)
-        }
+        console.error('[auto-glow] Requests Queue write failed:', formatGoogleSheetsError(logErr))
         return res.status(503).json({
           error:
-            'We could not save your contact details to our log, so your time was not held. Please try again in a moment or call us.',
+            'We could not save your request. Please try again in a moment or call us.',
         })
       }
 
-      return res.status(201).json({ ok: true, row, date: dateISO, slots: toReserve })
+      return res.status(201).json({
+        ok: true,
+        pending: true,
+        date: dateISO,
+        slots: toReserve,
+        message:
+          'Request received — the owner will confirm your booking. Your time is not reserved on the calendar until then.',
+      })
     } catch (err) {
       console.error(err)
       return res.status(500).json({ error: err.message || 'Booking failed' })
@@ -946,6 +1418,96 @@ function createApp() {
           formatGoogleSheetsError(err) ||
           'Could not write headers (check tab name GOOGLE_SHEETS_SUBMISSIONS_TAB and service account access).',
       })
+    }
+  })
+
+  async function handleAdminGetRequestQueue(_req, res) {
+    try {
+      assertSheetsEnv()
+    } catch (e) {
+      return res.status(e.status || 500).json({ error: e.message })
+    }
+    try {
+      const sheets = await getSheets()
+      const { tab, pending } = await loadPendingRequestQueueForAdmin(sheets)
+      return res.json({ tab, pending })
+    } catch (err) {
+      console.error(err)
+      return res.status(500).json({ error: err.message || 'Queue read failed' })
+    }
+  }
+
+  app.get('/api/admin/request-queue', requireAdmin, handleAdminGetRequestQueue)
+  /** Alias without hyphen (avoids rare proxy/path issues). */
+  app.get('/api/admin/queue', requireAdmin, handleAdminGetRequestQueue)
+
+  app.post('/api/admin/request-queue/accept', requireAdmin, async (req, res) => {
+    try {
+      assertSheetsEnv()
+    } catch (e) {
+      return res.status(e.status || 500).json({ error: e.message })
+    }
+    const clientReferenceId = String(req.body?.clientReferenceId ?? '').trim()
+    if (!clientReferenceId) {
+      return res.status(400).json({ error: 'clientReferenceId is required' })
+    }
+    try {
+      const sheets = await getSheets()
+      const values = await readRequestQueueValues(sheets)
+      const idx = findQueueRowIndexByRef(values, clientReferenceId)
+      if (idx < 0) return res.status(404).json({ error: 'Queue entry not found' })
+      const row = values[idx]
+      const status = String(row[SUB_COL_STATUS] ?? '').trim().toLowerCase()
+      if (status && status !== 'pending') {
+        return res.status(409).json({ error: 'This request is not pending.' })
+      }
+      const body = bookingBodyFromSubmissionRow(row)
+      const result = await confirmBookingOnCalendar(sheets, body)
+      if (!result.ok) {
+        return res.status(result.status).json({ error: result.error })
+      }
+      const up = await updateQueueRowStatus(sheets, clientReferenceId, 'Accepted')
+      if (!up.ok) {
+        console.error('[auto-glow] Queue status update failed after calendar confirm', clientReferenceId)
+      }
+      return res.json({
+        ok: true,
+        calendarRow: result.row,
+        date: result.date,
+        slots: result.slots,
+      })
+    } catch (err) {
+      console.error(err)
+      return res.status(500).json({ error: err.message || 'Accept failed' })
+    }
+  })
+
+  app.post('/api/admin/request-queue/decline', requireAdmin, async (req, res) => {
+    try {
+      assertSheetsEnv()
+    } catch (e) {
+      return res.status(e.status || 500).json({ error: e.message })
+    }
+    const clientReferenceId = String(req.body?.clientReferenceId ?? '').trim()
+    if (!clientReferenceId) {
+      return res.status(400).json({ error: 'clientReferenceId is required' })
+    }
+    try {
+      const sheets = await getSheets()
+      const values = await readRequestQueueValues(sheets)
+      const idx = findQueueRowIndexByRef(values, clientReferenceId)
+      if (idx < 0) return res.status(404).json({ error: 'Queue entry not found' })
+      const row = values[idx]
+      const status = String(row[SUB_COL_STATUS] ?? '').trim().toLowerCase()
+      if (status && status !== 'pending') {
+        return res.status(409).json({ error: 'This request is not pending.' })
+      }
+      const up = await updateQueueRowStatus(sheets, clientReferenceId, 'Declined')
+      if (!up.ok) return res.status(500).json({ error: up.error || 'Update failed' })
+      return res.json({ ok: true })
+    } catch (err) {
+      console.error(err)
+      return res.status(500).json({ error: err.message || 'Decline failed' })
     }
   })
 
@@ -1044,7 +1606,22 @@ function createApp() {
           }),
         ),
       }))
-      return res.json({ tab: CALENDAR_TAB, rows: out })
+      let requestQueuePending = []
+      let requestQueueError = null
+      try {
+        const q = await loadPendingRequestQueueForAdmin(sheets)
+        requestQueuePending = q.pending
+      } catch (queueErr) {
+        console.error('[auto-glow] schedule: bundled request queue failed', queueErr)
+        requestQueueError = queueErr.message || 'Queue read failed'
+      }
+      return res.json({
+        tab: CALENDAR_TAB,
+        rows: out,
+        requestQueueTab: REQUEST_QUEUE_TAB,
+        requestQueuePending,
+        ...(requestQueueError ? { requestQueueError } : {}),
+      })
     } catch (err) {
       console.error(err)
       return res.status(500).json({ error: err.message || 'Sheets error' })
@@ -1144,7 +1721,7 @@ function main() {
 
 export { createApp }
 
-if (!isSplitStaticHost()) {
+if (!isSplitStaticHost() && isExecutedDirectly()) {
   try {
     main()
   } catch (e) {

@@ -1,3 +1,5 @@
+import { formatUsPhoneInput } from '../lib/formatUsPhone'
+
 type Contact = { name: string; phone: string; email: string; notes: string }
 
 export function ContactStep({
@@ -30,10 +32,11 @@ export function ContactStep({
         <input
           id="phone"
           type="tel"
+          inputMode="tel"
           className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none ring-cyan-400/50 transition placeholder:text-slate-500 focus:border-cyan-400/40 focus:ring-2"
-          placeholder="Best number to reach you"
+          placeholder="(555) 123-4567 or +1 …"
           value={value.phone}
-          onChange={(e) => onChange({ ...value, phone: e.target.value })}
+          onChange={(e) => onChange({ ...value, phone: formatUsPhoneInput(e.target.value) })}
           autoComplete="tel"
           required
         />
