@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react'
+import { CustomerDataConsentModal } from './CustomerDataConsentModal'
 import { formatUsPhoneInput, phoneDigitsOnly } from '../lib/formatUsPhone'
+import { hasActiveReturningPhoneLoginConsent, persistAllCustomerConsents } from '../lib/customerConsentStorage'
 import { firstNameFromFullName } from '../lib/personName'
 
 const DEFAULT_LOYALTY_TIER_LABELS = ['10% off', '15% off', '20% off', '25% off', '30% off'] as const
@@ -38,6 +40,8 @@ export function ReturningCustomerLoyaltyScreen({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loyalty, setLoyalty] = useState<LoyaltyLookupResult | null>(null)
+  /** After a successful lookup, block punch card until returning-phone + marketing consent is stored. */
+  const [postLookupConsentOpen, setPostLookupConsentOpen] = useState(false)
 
   async function runLookup() {
     const d = phoneDigitsOnly(phone)
@@ -59,6 +63,7 @@ export function ReturningCustomerLoyaltyScreen({
       if (!res.ok) {
         setError(typeof data.error === 'string' ? data.error : 'Lookup failed. Try again.')
         setLoyalty(null)
+        setPostLookupConsentOpen(false)
         onWelcomeNameResolved?.(firstNameFromFullName(welcomeFirstNameHint ?? ''))
         return
       }
@@ -87,9 +92,11 @@ export function ReturningCustomerLoyaltyScreen({
       }
       setLoyalty(nextLoyalty)
       onWelcomeNameResolved?.(resolvedFirst)
+      setPostLookupConsentOpen(!hasActiveReturningPhoneLoginConsent())
     } catch {
       setError('Network error — check your connection and try again.')
       setLoyalty(null)
+      setPostLookupConsentOpen(false)
       onWelcomeNameResolved?.(firstNameFromFullName(welcomeFirstNameHint ?? ''))
     } finally {
       setLoading(false)
@@ -137,6 +144,7 @@ export function ReturningCustomerLoyaltyScreen({
             onChange={(e) => {
               setPhone(formatUsPhoneInput(e.target.value))
               setLoyalty(null)
+              setPostLookupConsentOpen(false)
               onWelcomeNameResolved?.(firstNameFromFullName(welcomeFirstNameHint ?? ''))
             }}
           />
@@ -155,7 +163,7 @@ export function ReturningCustomerLoyaltyScreen({
         </button>
       </form>
 
-      {loyalty ? (
+      {loyalty && !postLookupConsentOpen ? (
         <div className="space-y-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
           <p className="text-sm leading-relaxed text-slate-200">{loyalty.message}</p>
 
@@ -221,6 +229,24 @@ export function ReturningCustomerLoyaltyScreen({
       >
         Back
       </button>
+
+      {postLookupConsentOpen ? (
+        <CustomerDataConsentModal
+          open
+          context="returning"
+          onAccept={() => {
+            persistAllCustomerConsents()
+            setPostLookupConsentOpen(false)
+          }}
+          onDecline={() => {
+            setPostLookupConsentOpen(false)
+            setLoyalty(null)
+            setError(
+              'To view your digital punch card and continue, please accept the privacy and messaging terms—or contact Jackson Auto Glow directly.',
+            )
+          }}
+        />
+      ) : null}
     </div>
   )
 }

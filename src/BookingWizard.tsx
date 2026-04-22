@@ -3,10 +3,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react'
 import { ContactStep } from './components/ContactStep'
+import { CustomerDataConsentModal } from './components/CustomerDataConsentModal'
 import { CustomerGateScreen } from './components/CustomerGateScreen'
 import {
   ReturningCustomerLoyaltyScreen,
@@ -32,6 +34,12 @@ import {
 } from './data/services'
 import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion'
 import { buildRequestPayload } from './lib/buildPayload'
+import {
+  hasActiveCustomerConsent,
+  hasActiveReturningPhoneLoginConsent,
+  persistAllCustomerConsents,
+  persistCustomerConsent,
+} from './lib/customerConsentStorage'
 import { phoneDigitsOnly } from './lib/formatUsPhone'
 import { firstNameFromFullName } from './lib/personName'
 import type {
@@ -154,6 +162,12 @@ export default function BookingWizard() {
   const [entryKind, setEntryKind] = useState<'new' | 'returning' | null>(null)
   const [loyaltySnapshot, setLoyaltySnapshot] = useState<LoyaltyLookupResult | null>(null)
   const [returningShellFirstName, setReturningShellFirstName] = useState('')
+  const [consentGateOpen, setConsentGateOpen] = useState(false)
+  const [consentGateContext, setConsentGateContext] = useState<'new' | 'returning'>('new')
+  const pendingReturningAfterConsent = useRef<{
+    phone: string
+    loyalty: LoyaltyLookupResult
+  } | null>(null)
 
   const subFlowKey = `${selectedPackageId}:${vehicleType}`
 
@@ -466,56 +480,119 @@ export default function BookingWizard() {
     setParkingNotes('')
   }
 
+  const applyReturningToBooking = useCallback((phone: string, loyalty: LoyaltyLookupResult) => {
+    setEntryKind('returning')
+    setLoyaltySnapshot(loyalty)
+    setContact((c) => ({
+      ...c,
+      phone: phone.trim(),
+      name: loyalty.contactHint.name || c.name,
+      email: loyalty.contactHint.email || c.email,
+    }))
+    setFlowPhase('booking')
+  }, [])
+
+  const proceedNewCustomerToBooking = useCallback(() => {
+    setEntryKind('new')
+    setLoyaltySnapshot(null)
+    setFlowPhase('booking')
+  }, [])
+
+  const openConsentForNewCustomer = useCallback(() => {
+    if (hasActiveCustomerConsent()) {
+      proceedNewCustomerToBooking()
+      return
+    }
+    pendingReturningAfterConsent.current = null
+    setConsentGateContext('new')
+    setConsentGateOpen(true)
+  }, [proceedNewCustomerToBooking])
+
+  const openConsentForReturningBooking = useCallback(
+    (phone: string, loyalty: LoyaltyLookupResult) => {
+      if (hasActiveReturningPhoneLoginConsent()) {
+        applyReturningToBooking(phone, loyalty)
+        return
+      }
+      pendingReturningAfterConsent.current = { phone, loyalty }
+      setConsentGateContext('returning')
+      setConsentGateOpen(true)
+    },
+    [applyReturningToBooking],
+  )
+
+  const handleConsentAccept = useCallback(() => {
+    if (consentGateContext === 'new') {
+      persistCustomerConsent()
+    } else {
+      persistAllCustomerConsents()
+    }
+    setConsentGateOpen(false)
+    const pending = pendingReturningAfterConsent.current
+    pendingReturningAfterConsent.current = null
+    if (pending) {
+      applyReturningToBooking(pending.phone, pending.loyalty)
+    } else {
+      proceedNewCustomerToBooking()
+    }
+  }, [applyReturningToBooking, consentGateContext, proceedNewCustomerToBooking])
+
+  const handleConsentDecline = useCallback(() => {
+    setConsentGateOpen(false)
+    pendingReturningAfterConsent.current = null
+  }, [])
+
+  const consentModalEl = (
+    <CustomerDataConsentModal
+      open={consentGateOpen}
+      context={consentGateContext}
+      onAccept={handleConsentAccept}
+      onDecline={handleConsentDecline}
+    />
+  )
+
   if (flowPhase === 'gate') {
     return (
-      <div className="relative min-h-dvh pb-10">
-        <GateHeader />
-        <div className="form-ambient-layer" aria-hidden />
-        <main className="relative z-10 mx-auto max-w-lg px-4 pt-6">
-          <CustomerGateScreen
-            onNewCustomer={() => {
-              setEntryKind('new')
-              setLoyaltySnapshot(null)
-              setFlowPhase('booking')
-            }}
-            onReturningCustomer={() => {
-              setReturningShellFirstName('')
-              setFlowPhase('returning')
-            }}
-          />
-        </main>
-      </div>
+      <>
+        <div className="relative min-h-dvh pb-10">
+          <GateHeader />
+          <div className="form-ambient-layer" aria-hidden />
+          <main className="relative z-10 mx-auto max-w-lg px-4 pt-6">
+            <CustomerGateScreen
+              onNewCustomer={openConsentForNewCustomer}
+              onReturningCustomer={() => {
+                setReturningShellFirstName('')
+                setFlowPhase('returning')
+              }}
+            />
+          </main>
+        </div>
+        {consentModalEl}
+      </>
     )
   }
 
   if (flowPhase === 'returning') {
     return (
-      <div className="relative min-h-dvh pb-10">
-        <ReturningFlowHeader firstName={returningShellFirstName} />
-        <div className="form-ambient-layer" aria-hidden />
-        <main className="relative z-10 mx-auto max-w-lg px-4 pt-6">
-          <ReturningCustomerLoyaltyScreen
-            initialPhone={contact.phone}
-            welcomeFirstNameHint={firstNameFromFullName(contact.name)}
-            onBack={() => {
-              setReturningShellFirstName('')
-              setFlowPhase('gate')
-            }}
-            onWelcomeNameResolved={setReturningShellFirstName}
-            onContinueToBooking={(phone, loyalty) => {
-              setEntryKind('returning')
-              setLoyaltySnapshot(loyalty)
-              setContact((c) => ({
-                ...c,
-                phone: phone.trim(),
-                name: loyalty.contactHint.name || c.name,
-                email: loyalty.contactHint.email || c.email,
-              }))
-              setFlowPhase('booking')
-            }}
-          />
-        </main>
-      </div>
+      <>
+        <div className="relative min-h-dvh pb-10">
+          <ReturningFlowHeader firstName={returningShellFirstName} />
+          <div className="form-ambient-layer" aria-hidden />
+          <main className="relative z-10 mx-auto max-w-lg px-4 pt-6">
+            <ReturningCustomerLoyaltyScreen
+              initialPhone={contact.phone}
+              welcomeFirstNameHint={firstNameFromFullName(contact.name)}
+              onBack={() => {
+                setReturningShellFirstName('')
+                setFlowPhase('gate')
+              }}
+              onWelcomeNameResolved={setReturningShellFirstName}
+              onContinueToBooking={openConsentForReturningBooking}
+            />
+          </main>
+        </div>
+        {consentModalEl}
+      </>
     )
   }
 
@@ -533,11 +610,7 @@ export default function BookingWizard() {
         </header>
         <div className="form-ambient-layer" aria-hidden />
         <div className="relative z-10">
-          <SuccessScreen
-            payload={submitted}
-            pendingInQueue={pendingInQueue}
-            onStartNew={resetWizard}
-          />
+          <SuccessScreen pendingInQueue={pendingInQueue} onStartNew={resetWizard} />
         </div>
       </div>
     )
@@ -560,7 +633,8 @@ export default function BookingWizard() {
       : ''
 
   return (
-    <div className={`relative min-h-dvh ${bottomPad}`}>
+    <>
+      <div className={`relative min-h-dvh ${bottomPad}`}>
       <header
         className={`sticky top-0 z-[40] min-h-[150px] border-b bg-black px-3 sm:px-4 ${
           entryKind === 'returning' ? 'border-emerald-500/25' : 'border-white/5'
@@ -804,6 +878,8 @@ export default function BookingWizard() {
         onAccept={acceptFullEverything}
         onDecline={declineFullEverything}
       />
-    </div>
+      </div>
+      {consentModalEl}
+    </>
   )
 }

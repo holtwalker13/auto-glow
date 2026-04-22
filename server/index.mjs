@@ -1978,12 +1978,18 @@ function createApp() {
     const slot = req.body?.slot
     const action = req.body?.action
     if (!dateISO) return res.status(400).json({ error: 'Invalid date' })
-    if (!['blockout', 'clear'].includes(action)) {
-      return res.status(400).json({ error: 'action must be blockout or clear' })
+    if (!['blockout', 'clear', 'clear_booking'].includes(action)) {
+      return res.status(400).json({ error: 'action must be blockout, clear, or clear_booking' })
     }
-    const targets =
-      slot === 'all' ? [...SLOTS] : SLOTS.includes(slot) ? [slot] : null
-    if (!targets) return res.status(400).json({ error: 'Invalid slot' })
+
+    let targets
+    if (action === 'clear_booking' && Array.isArray(req.body?.slots) && req.body.slots.length > 0) {
+      targets = [...new Set(req.body.slots.map((s) => String(s)))].filter((s) => SLOTS.includes(s))
+      if (targets.length === 0) return res.status(400).json({ error: 'Invalid slots' })
+    } else {
+      targets = slot === 'all' ? [...SLOTS] : SLOTS.includes(slot) ? [slot] : null
+      if (!targets) return res.status(400).json({ error: 'Invalid slot' })
+    }
 
     try {
       const sheets = await getSheets()
@@ -1992,6 +1998,9 @@ function createApp() {
 
       if (action === 'blockout') {
         const updates = targets.map((s) => ({ col: colForSlot(s), value: 'x' }))
+        await updateCells(sheets, row, updates)
+      } else if (action === 'clear_booking') {
+        const updates = targets.map((s) => ({ col: colForSlot(s), value: '' }))
         await updateCells(sheets, row, updates)
       } else {
         for (const s of targets) {

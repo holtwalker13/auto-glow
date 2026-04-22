@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Ban, MessageSquare, Trash2, X } from 'lucide-react'
+import {
+  Ban,
+  CalendarClock,
+  CarFront,
+  Clock3,
+  FileText,
+  LayoutGrid,
+  LayoutList,
+  Mail,
+  MapPin,
+  MessageSquare,
+  Phone,
+  Trash2,
+  UserRound,
+  X,
+} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   buildCustomerConfirmationMessage,
@@ -77,11 +92,135 @@ function openBookingSelection(row: Row, slot: PreferredTimeSlot): SelectedBookin
   return { row, label, slots }
 }
 
+function formatLocalYmd(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** Sunday–Saturday week containing `d` (local). */
+function startOfWeekSunday(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0)
+  x.setDate(x.getDate() - x.getDay())
+  return x
+}
+
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0)
+  x.setDate(x.getDate() + n)
+  return x
+}
+
+function buildWeekDates(weekStart: Date): string[] {
+  return Array.from({ length: 7 }, (_, i) => formatLocalYmd(addDays(weekStart, i)))
+}
+
 function slotStyle(s: SlotState | undefined) {
   if (!s || s.status === 'free') return 'bg-white/[0.04] text-slate-500'
   if (s.status === 'block')
     return 'bg-amber-950/40 text-amber-200/70 border border-amber-800/30'
   return 'bg-cyan-500/15 text-cyan-100 border border-cyan-500/30'
+}
+
+function AdminCalendarGridSlot({
+  row,
+  slot,
+  busyKey,
+  onOpenBooking,
+  onSlotAction,
+}: {
+  row: Row | undefined
+  slot: PreferredTimeSlot
+  busyKey: string | null
+  onOpenBooking: (sel: SelectedBooking) => void
+  onSlotAction: (date: string, slot: PreferredTimeSlot | 'all', action: 'blockout' | 'clear') => void | Promise<void>
+}) {
+  if (!row) {
+    return (
+      <div className="flex min-h-[4.5rem] flex-col rounded-md border border-dashed border-white/10 bg-black/25 p-1">
+        <span className="text-[9px] font-medium text-slate-600">{labelPreferredTime(slot)}</span>
+        <span className="flex flex-1 items-center justify-center text-[10px] text-slate-600">—</span>
+      </div>
+    )
+  }
+
+  const s = row.slots[slot]
+  const bookedText = s?.status === 'booked' && s.label ? s.label : null
+  const isBooked = s?.status === 'booked' && Boolean(s.label?.trim())
+  const isBlock = s?.status === 'block'
+
+  const iconBtn =
+    'flex h-6 w-6 shrink-0 items-center justify-center rounded border disabled:opacity-40 border-white/10 text-slate-400 hover:bg-white/5'
+
+  function inner() {
+    if (isBlock) {
+      return (
+        <span className="flex min-h-[2.25rem] items-center justify-center" aria-label="Blocked">
+          <X className="h-4 w-4 text-amber-200/75" strokeWidth={2.5} />
+        </span>
+      )
+    }
+    if (bookedText) {
+      return (
+        <span className="line-clamp-3 break-words text-left text-[10px] leading-snug text-cyan-50 max-[749px]:line-clamp-1 max-[749px]:text-[8px] max-[749px]:leading-none max-[749px]:text-center">
+          {bookedText}
+        </span>
+      )
+    }
+    return <span className="text-[10px] text-slate-600 max-[749px]:text-[8px]">—</span>
+  }
+
+  const body = isBooked ? (
+    <button
+      type="button"
+      onClick={() => {
+        const sel = openBookingSelection(row, slot)
+        if (sel) onOpenBooking(sel)
+      }}
+      className={`min-h-[2.75rem] w-full rounded-md px-1 py-0.5 text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60 max-[749px]:min-h-[1.2rem] max-[749px]:px-0 max-[749px]:py-0 ${slotStyle(s)}`}
+      title="Booking details"
+    >
+      {inner()}
+    </button>
+  ) : (
+    <div className={`min-h-[2.75rem] w-full rounded-md px-1 py-0.5 max-[749px]:min-h-[1.2rem] max-[749px]:px-0 max-[749px]:py-0 ${slotStyle(s)}`}>{inner()}</div>
+  )
+
+  return (
+    <div className="flex min-h-[4.75rem] flex-col gap-0.5 rounded-md border border-white/10 bg-white/[0.02] p-1 max-[749px]:min-h-[2.25rem] max-[749px]:p-0.5">
+      <div className="flex items-center justify-between gap-0.5 max-[749px]:justify-center">
+        <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 max-[749px]:hidden">
+          {labelPreferredTime(slot)}
+        </span>
+        <div className="flex shrink-0 gap-0.5 max-[749px]:hidden">
+          <button
+            type="button"
+            disabled={busyKey !== null}
+            onClick={() => void onSlotAction(row.date, slot, 'blockout')}
+            className={`${iconBtn} border-amber-800/40 bg-amber-950/35 text-amber-200/80 hover:bg-amber-950/50`}
+            aria-label="Block slot"
+            title="Block"
+          >
+            <Ban className="h-3 w-3" strokeWidth={2} aria-hidden />
+          </button>
+          <button
+            type="button"
+            disabled={busyKey !== null}
+            onClick={() => void onSlotAction(row.date, slot, 'clear')}
+            className={iconBtn}
+            aria-label="Clear slot"
+            title="Clear"
+          >
+            <Trash2 className="h-3 w-3" strokeWidth={2} aria-hidden />
+          </button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 max-[749px]:flex max-[749px]:items-center max-[749px]:justify-center">
+        {body}
+      </div>
+    </div>
+  )
 }
 
 type SlotCellProps = {
@@ -275,6 +414,7 @@ export function AdminDashboard() {
   const [selectedQueueItem, setSelectedQueueItem] = useState<QueuePendingItem | null>(null)
   const [queueModalError, setQueueModalError] = useState<string | null>(null)
   const [queueBusy, setQueueBusy] = useState<string | null>(null)
+  const [calendarView, setCalendarView] = useState<'list' | 'grid'>('list')
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -471,6 +611,33 @@ export function AdminDashboard() {
     }
   }
 
+  async function clearBookingForSelection(sel: SelectedBooking) {
+    const key = `clear_booking-${sel.row.date}-${sel.slots.join(',')}`
+    setBusyKey(key)
+    setModalSheetError(null)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/slot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          date: sel.row.date,
+          action: 'clear_booking',
+          slots: sel.slots,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || res.statusText)
+      setSelectedBooking(null)
+      await refresh()
+    } catch (e) {
+      setModalSheetError(e instanceof Error ? e.message : 'Could not remove booking')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
   async function writeSubmissionsHeaders() {
     setHeadersBusy(true)
     setHeadersHint(null)
@@ -545,6 +712,45 @@ export function AdminDashboard() {
     }
   }
 
+  const sorted = useMemo(() => [...rows].sort((a, b) => a.date.localeCompare(b.date)), [rows])
+
+  const rowByDate = useMemo(() => {
+    const m = new Map<string, Row>()
+    for (const r of sorted) {
+      if (!m.has(r.date)) m.set(r.date, r)
+    }
+    return m
+  }, [sorted])
+
+  const gridWeeks = useMemo(() => {
+    const todayWeek = startOfWeekSunday(new Date())
+    const firstDate = sorted[0]?.date
+    const lastDate = sorted[sorted.length - 1]?.date
+    const firstWeek = firstDate
+      ? startOfWeekSunday(new Date(`${firstDate}T12:00:00`))
+      : todayWeek
+    const lastWeek = lastDate ? startOfWeekSunday(new Date(`${lastDate}T12:00:00`)) : todayWeek
+    const start = firstWeek <= todayWeek ? firstWeek : todayWeek
+    const end = lastWeek >= todayWeek ? lastWeek : todayWeek
+    const monthFmt = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' })
+
+    const weeks: Array<{ weekStart: Date; dates: string[]; monthLabel: string | null }> = []
+    let cursor = start
+    let prevMonth = -1
+    while (cursor <= end) {
+      const month = cursor.getMonth()
+      const monthLabel = month !== prevMonth ? monthFmt.format(cursor) : null
+      weeks.push({
+        weekStart: new Date(cursor),
+        dates: buildWeekDates(cursor),
+        monthLabel,
+      })
+      prevMonth = month
+      cursor = addDays(cursor, 7)
+    }
+    return weeks
+  }, [sorted])
+
   if (loggedIn === null) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-black text-white">
@@ -592,8 +798,6 @@ export function AdminDashboard() {
     )
   }
 
-  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date))
-
   return (
     <div className="min-h-dvh bg-black px-4 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-white sm:py-6">
       <div className="mx-auto max-w-5xl">
@@ -609,12 +813,7 @@ export function AdminDashboard() {
               Availability & bookings
             </h1>
             <p className="mt-2 max-w-prose text-xs leading-snug text-slate-500 sm:text-sm">
-              <span className="hidden sm:inline">
-                Cyan = booked · Amber = blockout · Tap a booking for details · Block/Clear under each slot.
-              </span>
-              <span className="sm:hidden">
-                Booked = cyan · Block = amber · Tap booking for message · Use Block/Clear per time.
-              </span>
+              Manage availability and customer requests.
             </p>
           </div>
           <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
@@ -661,9 +860,7 @@ export function AdminDashboard() {
             Requests queue
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-slate-400 sm:text-sm">
-            Pending site requests are <strong className="text-slate-200">not</strong> on the calendar until
-            you accept them. Declining frees nothing on the sheet (they were never held). Accept reserves the
-            slot and logs Submitted Requests.
+            Review and accept or decline incoming booking requests.
           </p>
           {queueError ? (
             <p
@@ -718,6 +915,121 @@ export function AdminDashboard() {
         </section>
 
         <div className="mt-6">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div
+              className="inline-flex w-full rounded-xl border border-white/15 bg-black/30 p-0.5 sm:w-auto"
+              role="group"
+              aria-label="Calendar layout"
+            >
+              <button
+                type="button"
+                onClick={() => setCalendarView('list')}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium sm:flex-none sm:text-sm ${
+                  calendarView === 'list'
+                    ? 'bg-white/15 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <LayoutList className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                List
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendarView('grid')}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium sm:flex-none sm:text-sm ${
+                  calendarView === 'grid'
+                    ? 'bg-white/15 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <LayoutGrid className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                Grid
+              </button>
+            </div>
+            {calendarView === 'grid' ? (
+              <p className="text-center text-xs text-slate-400 sm:text-right">
+                Scroll weeks · month breaks are separated
+              </p>
+            ) : null}
+          </div>
+
+          {calendarView === 'grid' ? (
+            <div className="max-h-[70dvh] overflow-y-auto rounded-xl border border-white/10 bg-black/25 p-2 sm:p-3">
+              <p className="mb-2 text-center text-[11px] text-slate-500 sm:text-left">
+                Sun–Sat · {SLOT_KEYS.map((k) => labelPreferredTime(k)).join(' · ')}
+              </p>
+              {gridWeeks.map((week, idx) => (
+                <div key={formatLocalYmd(week.weekStart)} className={idx === 0 ? '' : 'mt-4'}>
+                  {week.monthLabel ? (
+                    <div className={idx === 0 ? 'mb-2' : 'mb-2 mt-4 border-t border-white/10 pt-4'}>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-cyan-200/80">
+                        {week.monthLabel}
+                      </p>
+                    </div>
+                  ) : null}
+                  <div className="pb-1">
+                    <div className="mx-auto w-full">
+                      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-xl border border-white/10 bg-white/10">
+                        {week.dates.map((dateStr) => {
+                          const row = rowByDate.get(dateStr)
+                          const d = new Date(`${dateStr}T12:00:00`)
+                          const wd = new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(d)
+                          const md = new Intl.DateTimeFormat(undefined, {
+                            month: 'numeric',
+                            day: 'numeric',
+                          }).format(d)
+                          return (
+                            <div key={dateStr} className="flex min-w-0 flex-col bg-zinc-950">
+                              <div className="border-b border-white/10 px-1 py-2 text-center max-[749px]:px-0.5 max-[749px]:py-1">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 max-[749px]:text-[8px] max-[749px]:tracking-normal">
+                                  {wd}
+                                </p>
+                                <p className="text-xs font-semibold text-white max-[749px]:text-[9px]">{md}</p>
+                                <p className="mt-0.5 font-mono text-[9px] text-slate-600 max-[749px]:hidden">{dateStr}</p>
+                              </div>
+                              <div className="flex flex-1 flex-col gap-1 p-1 max-[749px]:gap-0.5 max-[749px]:p-0.5">
+                                {SLOT_KEYS.map((slot) => (
+                                  <AdminCalendarGridSlot
+                                    key={slot}
+                                    row={row}
+                                    slot={slot}
+                                    busyKey={busyKey}
+                                    onOpenBooking={setSelectedBooking}
+                                    onSlotAction={slotAction}
+                                  />
+                                ))}
+                              </div>
+                              <div className="flex gap-0.5 border-t border-white/10 p-1 max-[749px]:hidden">
+                                <button
+                                  type="button"
+                                  disabled={busyKey !== null || !row}
+                                  onClick={() => row && void slotAction(row.date, 'all', 'blockout')}
+                                  className="min-h-8 flex-1 rounded-md border border-amber-800/35 bg-amber-950/30 px-1 py-0.5 text-[9px] font-medium text-amber-100 hover:bg-amber-950/45 disabled:opacity-40"
+                                >
+                                  Block day
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busyKey !== null || !row}
+                                  onClick={() => row && void slotAction(row.date, 'all', 'clear')}
+                                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 text-slate-400 hover:bg-white/5 disabled:opacity-40"
+                                  aria-label="Clear day blockouts"
+                                  title="Clear day"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
           {/* Mobile: one card per day — no horizontal scroll */}
           <div className="space-y-3 md:hidden">
             {sorted.length === 0 ? (
@@ -855,15 +1167,13 @@ export function AdminDashboard() {
               </tbody>
             </table>
           </div>
+            </>
+          )}
         </div>
 
         <p className="mt-6 text-xs leading-relaxed text-slate-600 sm:text-sm">
-          <span className="hidden sm:inline">Legend: </span>
-          {SLOT_KEYS.map((k) => `${labelPreferredTime(k)}`).join(' · ')}. “Clear” only removes empty or
-          blockout cells; booked slots stay until edited in Sheets. New <strong className="text-slate-500">site</strong>{' '}
-          bookings go to the <strong className="text-slate-500">Requests Queue</strong> tab until you accept (then
-          the calendar updates and a row is added to <strong className="text-slate-500">Submitted Requests</strong>
-          ). <strong className="text-slate-500">Sheet headers</strong> writes row 1 if needed.
+          Per-slot “Clear” removes blockouts only. To free a booked slot, open the booking and use{' '}
+          <strong className="font-medium text-slate-400">Remove booking</strong>, or edit the cell in Sheets.
         </p>
 
         {selectedBooking && confirmationDraft ? (
@@ -880,42 +1190,54 @@ export function AdminDashboard() {
                 className="my-auto w-full max-w-lg max-h-[min(88dvh,calc(100dvh-2rem))] overflow-y-auto overscroll-contain rounded-2xl border border-cyan-500/20 bg-zinc-950 p-4 shadow-2xl shadow-cyan-950/40 sm:max-h-[min(90vh,720px)] sm:p-5"
                 onClick={(e) => e.stopPropagation()}
               >
-              <div className="flex items-start justify-between gap-2">
-                <h2
-                  id="booking-modal-title"
-                  className="font-display text-base font-bold italic text-white sm:text-lg"
-                >
-                  Booking details
-                </h2>
+              <div className="flex items-start justify-between gap-3 pb-3 sm:pb-4">
+                <div>
+                  <h2
+                    id="booking-modal-title"
+                    className="font-display text-lg font-bold italic tracking-tight text-white sm:text-xl"
+                  >
+                    Booking details
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">Review customer info, then send confirmation.</p>
+                </div>
                 <button
                   type="button"
                   onClick={() => setSelectedBooking(null)}
-                  className="rounded-lg border border-white/10 p-2 text-slate-400 hover:bg-white/5 hover:text-white"
+                  className="rounded-xl p-2 text-slate-400 hover:bg-white/5 hover:text-white"
                   aria-label="Close"
                 >
                   <X className="h-4 w-4" strokeWidth={2} />
                 </button>
               </div>
 
-              <dl className="mt-3 space-y-2 text-xs sm:mt-4 sm:space-y-3 sm:text-sm">
-                <div>
-                  <dt className="font-medium uppercase tracking-wider text-slate-500">Date</dt>
-                  <dd className="mt-0.5 text-slate-200">
+              <dl className="mt-4 grid gap-2 text-xs sm:mt-5 sm:grid-cols-2 sm:gap-3 sm:text-sm">
+                <div className="p-3">
+                  <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+                    Date
+                  </dt>
+                  <dd className="mt-1 text-slate-100">
                     {selectedBooking.row.dateLabel ?? selectedBooking.row.date}
-                    <span className="ml-2 font-mono text-xs text-slate-600">{selectedBooking.row.date}</span>
+                    <span className="ml-2 font-mono text-xs text-slate-500">{selectedBooking.row.date}</span>
                   </dd>
                 </div>
-                <div>
-                  <dt className="font-medium uppercase tracking-wider text-slate-500">Time</dt>
-                  <dd className="mt-0.5 text-slate-200">
+                <div className="p-3">
+                  <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <Clock3 className="h-3.5 w-3.5" aria-hidden />
+                    Time
+                  </dt>
+                  <dd className="mt-1 text-slate-100">
                     {selectedBooking.slots.length >= 3
                       ? 'Full day (all slots)'
                       : selectedBooking.slots.map((k) => labelPreferredTime(k)).join(' · ')}
                   </dd>
                 </div>
-                <div>
-                  <dt className="font-medium uppercase tracking-wider text-slate-500">Phone</dt>
-                  <dd className="mt-0.5 text-slate-200">
+                <div className="p-3">
+                  <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <Phone className="h-3.5 w-3.5" aria-hidden />
+                    Phone
+                  </dt>
+                  <dd className="mt-1 text-slate-200">
                     {contactLookup.loading ? (
                       <span className="text-slate-500">Loading from submissions…</span>
                     ) : contactLookup.data?.phone ? (
@@ -942,60 +1264,71 @@ export function AdminDashboard() {
                     )}
                   </dd>
                 </div>
-                {contactLookup.data?.email ? (
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Email</dt>
-                    <dd className="mt-0.5">
+                <div className="p-3">
+                  <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <Mail className="h-3.5 w-3.5" aria-hidden />
+                    Email
+                  </dt>
+                  <dd className="mt-1 break-all text-slate-200">
+                    {contactLookup.data?.email ? (
                       <a
                         href={`mailto:${contactLookup.data.email}`}
-                        className="break-all text-cyan-300 underline-offset-2 hover:underline"
+                        className="text-cyan-300 underline-offset-2 hover:underline"
                       >
                         {contactLookup.data.email}
                       </a>
-                    </dd>
-                  </div>
-                ) : null}
-                <div>
-                  <dt className="font-medium uppercase tracking-wider text-slate-500">Calendar note</dt>
-                  <dd className="mt-0.5 break-words text-slate-300">{selectedBooking.label}</dd>
-                  <p className="mt-2 text-[11px] leading-snug text-slate-500">
-                    Column titles for the log live in <span className="text-slate-400">server/index.mjs</span>{' '}
-                    (<code className="rounded bg-white/5 px-1 text-[10px] text-slate-400">SUBMISSION_HEADERS</code>
-                    ). Row 1 is written on new site bookings and when you accept a request from the queue.
-                  </p>
+                    ) : (
+                      '—'
+                    )}
+                  </dd>
                 </div>
-                {(() => {
-                  const { name, detail } = parseCalendarBookingLabel(selectedBooking.label)
-                  if (!name && !detail) return null
-                  return (
-                    <div>
-                      <dt className="font-medium uppercase tracking-wider text-slate-500">
-                        Parsed from note
-                      </dt>
-                      <dd className="mt-0.5 text-slate-300">
-                        {name ? <span className="font-medium text-white">{name}</span> : null}
-                        {name && detail ? <span className="text-slate-500"> · </span> : null}
-                        {detail ? <span>{detail}</span> : null}
-                      </dd>
-                    </div>
-                  )
-                })()}
               </dl>
 
-              <div className="mt-4 sm:mt-6">
-                <p className="text-xs font-medium uppercase tracking-wider text-cyan-200/80">
+              <div className="mt-3 p-3">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  <FileText className="h-3.5 w-3.5" aria-hidden />
+                  Calendar note
+                </p>
+                <p className="mt-1 break-words text-slate-300">{selectedBooking.label}</p>
+                <p className="mt-2 text-[11px] leading-snug text-slate-500">
+                  Column titles for the log live in <span className="text-slate-400">server/index.mjs</span>{' '}
+                  (<code className="rounded bg-white/5 px-1 text-[10px] text-slate-400">SUBMISSION_HEADERS</code>
+                  ). Row 1 is written on new site bookings and when you accept a request from the queue.
+                </p>
+              </div>
+
+              {(() => {
+                const { name, detail } = parseCalendarBookingLabel(selectedBooking.label)
+                if (!name && !detail) return null
+                return (
+                  <div className="mt-3 p-3">
+                    <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <UserRound className="h-3.5 w-3.5" aria-hidden />
+                      Parsed from note
+                    </p>
+                    <p className="mt-1 text-slate-300">
+                      {name ? <span className="font-medium text-white">{name}</span> : null}
+                      {name && detail ? <span className="text-slate-500"> · </span> : null}
+                      {detail ? <span>{detail}</span> : null}
+                    </p>
+                  </div>
+                )
+              })()}
+
+              <div className="mt-4 p-3.5 sm:mt-5 sm:p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-cyan-200/85">
                   Message for your customer
                 </p>
-                <p className="mt-1 text-[11px] leading-snug text-slate-500 sm:text-xs">
+                <p className="mt-1 text-[11px] leading-snug text-slate-400 sm:text-xs">
                   Confirms their date and thanks them for Jackson Auto Glow.{' '}
-                  <strong className="font-medium text-slate-400">Message</strong> opens your default texting
+                  <strong className="font-medium text-slate-300">Message</strong> opens your default texting
                   app (e.g. Messages) with this draft to the phone number from their booking.
                 </p>
                 <textarea
                   readOnly
                   value={confirmationDraft}
                   rows={8}
-                  className="mt-2 max-h-[40vh] w-full resize-y rounded-xl border border-white/10 bg-black/40 px-2.5 py-2 font-sans text-base leading-snug text-slate-200 outline-none focus:border-cyan-500/40 sm:max-h-none sm:px-3 sm:py-2.5 sm:text-sm sm:leading-relaxed"
+                  className="mt-2 max-h-[40vh] w-full resize-y rounded-xl border border-white/10 bg-black/45 px-2.5 py-2 font-sans text-base leading-snug text-slate-100 outline-none focus:border-cyan-500/40 sm:max-h-none sm:px-3 sm:py-2.5 sm:text-sm sm:leading-relaxed"
                 />
                 {modalSheetError ? (
                   <p
@@ -1014,6 +1347,23 @@ export function AdminDashboard() {
                       Message
                     </a>
                   ) : null}
+                  <button
+                    type="button"
+                    disabled={busyKey !== null}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          'Remove this booking from the calendar? Those time slots will be emptied and can be booked again.',
+                        )
+                      )
+                        return
+                      void clearBookingForSelection(selectedBooking)
+                    }}
+                    className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-3 text-sm font-semibold text-red-100 hover:bg-red-500/20 disabled:opacity-50 sm:flex-1"
+                  >
+                    <Trash2 className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                    Remove booking
+                  </button>
                   <button
                     type="button"
                     onClick={() => setSelectedBooking(null)}
@@ -1042,31 +1392,40 @@ export function AdminDashboard() {
                 className="my-auto w-full max-w-lg max-h-[min(88dvh,calc(100dvh-2rem))] overflow-y-auto overscroll-contain rounded-2xl border border-white/12 bg-zinc-950 p-4 shadow-2xl sm:max-h-[min(90vh,720px)] sm:p-5"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <h2
-                    id="queue-modal-title"
-                    className="font-display text-base font-bold italic text-white sm:text-lg"
-                  >
-                    Pending request
-                  </h2>
+                <div className="flex items-start justify-between gap-3 pb-3 sm:pb-4">
+                  <div>
+                    <h2
+                      id="queue-modal-title"
+                      className="font-display text-lg font-bold italic tracking-tight text-white sm:text-xl"
+                    >
+                      Pending request
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500">Review details and choose the next action.</p>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setSelectedQueueItem(null)}
-                    className="rounded-lg border border-white/10 p-2 text-slate-400 hover:bg-white/5 hover:text-white"
+                    className="rounded-xl p-2 text-slate-400 hover:bg-white/5 hover:text-white"
                     aria-label="Close"
                   >
                     <X className="h-4 w-4" strokeWidth={2} />
                   </button>
                 </div>
 
-                <dl className="mt-4 space-y-2.5 text-xs sm:text-sm">
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Name</dt>
-                    <dd className="mt-0.5 text-slate-200">{selectedQueueItem.name || '—'}</dd>
+                <dl className="mt-4 grid gap-2 text-xs sm:mt-5 sm:grid-cols-2 sm:gap-3 sm:text-sm">
+                  <div className="p-3">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <UserRound className="h-3.5 w-3.5" aria-hidden />
+                      Name
+                    </dt>
+                    <dd className="mt-1 text-slate-100">{selectedQueueItem.name || '—'}</dd>
                   </div>
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Phone</dt>
-                    <dd className="mt-0.5">
+                  <div className="p-3">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <Phone className="h-3.5 w-3.5" aria-hidden />
+                      Phone
+                    </dt>
+                    <dd className="mt-1">
                       {selectedQueueItem.phone ? (
                         <a
                           href={`tel:${selectedQueueItem.phone.replace(/\s/g, '')}`}
@@ -1079,9 +1438,12 @@ export function AdminDashboard() {
                       )}
                     </dd>
                   </div>
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Email</dt>
-                    <dd className="mt-0.5 break-all">
+                  <div className="p-3">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <Mail className="h-3.5 w-3.5" aria-hidden />
+                      Email
+                    </dt>
+                    <dd className="mt-1 break-all">
                       {selectedQueueItem.email ? (
                         <a
                           href={`mailto:${selectedQueueItem.email}`}
@@ -1094,9 +1456,12 @@ export function AdminDashboard() {
                       )}
                     </dd>
                   </div>
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Date & time</dt>
-                    <dd className="mt-0.5 text-slate-200">
+                  <div className="p-3">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+                      Date & time
+                    </dt>
+                    <dd className="mt-1 text-slate-200">
                       <span className="font-mono text-slate-400">{selectedQueueItem.preferredDate}</span>
                       <span className="mx-1 text-slate-600">·</span>
                       {selectedQueueItem.fullDayCeramic?.toLowerCase() === 'yes'
@@ -1104,17 +1469,16 @@ export function AdminDashboard() {
                         : selectedQueueItem.timeSummary || '—'}
                     </dd>
                   </div>
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Package</dt>
-                    <dd className="mt-0.5 text-slate-200">
-                      <span className="font-medium text-white">
-                        {queuePackageDisplayName(selectedQueueItem)}
-                      </span>
+                  <div className="p-3">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <FileText className="h-3.5 w-3.5" aria-hidden />
+                      Package
+                    </dt>
+                    <dd className="mt-1 text-slate-200">
+                      <span className="font-medium text-white">{queuePackageDisplayName(selectedQueueItem)}</span>
                       {(() => {
                         const p = queueResolvedPackagePrice(selectedQueueItem)
-                        return p != null ? (
-                          <span className="text-cyan-300"> — ${p}</span>
-                        ) : null
+                        return p != null ? <span className="text-cyan-300"> — ${p}</span> : null
                       })()}
                       {selectedQueueItem.packageId ? (
                         <span className="mt-1 block font-mono text-[10px] text-slate-600">
@@ -1123,77 +1487,76 @@ export function AdminDashboard() {
                       ) : null}
                     </dd>
                   </div>
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Vehicle</dt>
-                    <dd className="mt-0.5 text-slate-200">
-                      {selectedQueueItem.vehicleTypeLabel}
-                      {selectedQueueItem.vehicleDescription
-                        ? ` · ${selectedQueueItem.vehicleDescription}`
-                        : ''}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Location</dt>
-                    <dd className="mt-0.5 text-slate-200">
-                      {selectedQueueItem.locationMode === 'shop' ? 'Shop' : 'Mobile'}
-                      {selectedQueueItem.address ? ` · ${selectedQueueItem.address}` : ''}
-                    </dd>
-                  </div>
-                  {selectedQueueItem.parkingNotes ? (
-                    <div>
-                      <dt className="font-medium uppercase tracking-wider text-slate-500">Parking</dt>
-                      <dd className="mt-0.5 text-slate-300">{selectedQueueItem.parkingNotes}</dd>
-                    </div>
-                  ) : null}
-                  {selectedQueueItem.contactNotes ? (
-                    <div>
-                      <dt className="font-medium uppercase tracking-wider text-slate-500">Notes</dt>
-                      <dd className="mt-0.5 text-slate-300">{selectedQueueItem.contactNotes}</dd>
-                    </div>
-                  ) : null}
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">
-                      Services & add-ons
+                  <div className="p-3">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <CarFront className="h-3.5 w-3.5" aria-hidden />
+                      Vehicle
                     </dt>
-                    <dd className="mt-0.5 text-slate-300">
-                      {selectedQueueItem.selectedAddonIds.length === 0 ? (
-                        <p className="text-slate-500">No add-ons — base package only.</p>
-                      ) : (
-                        <ul className="space-y-1.5 border-l border-cyan-500/20 pl-3">
-                          {selectedQueueItem.selectedAddonIds.map((id) => {
-                            const a = getAddonById(id)
-                            return (
-                              <li key={id} className="flex justify-between gap-3 text-sm">
-                                <span className="text-slate-200">{a?.name ?? id}</span>
-                                <span className="shrink-0 font-medium text-cyan-200/90">
-                                  {a ? `+$${a.price}` : '—'}
-                                </span>
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      )}
-                      {selectedQueueItem.addonsLineTotal != null &&
-                      selectedQueueItem.addonsLineTotal > 0 ? (
-                        <p className="mt-2 text-[11px] text-slate-500">
-                          Add-ons subtotal: ${selectedQueueItem.addonsLineTotal}
-                        </p>
-                      ) : null}
-                    </dd>
-                  </div>
-                  {selectedQueueItem.grandTotal != null ? (
-                    <div>
-                      <dt className="font-medium uppercase tracking-wider text-slate-500">Est. total</dt>
-                      <dd className="mt-0.5 text-slate-200">${selectedQueueItem.grandTotal}</dd>
-                    </div>
-                  ) : null}
-                  <div>
-                    <dt className="font-medium uppercase tracking-wider text-slate-500">Reference</dt>
-                    <dd className="mt-0.5 font-mono text-[11px] text-slate-500">
-                      {selectedQueueItem.clientReferenceId}
+                    <dd className="mt-1 text-slate-200">
+                      {selectedQueueItem.vehicleTypeLabel}
+                      {selectedQueueItem.vehicleDescription ? ` · ${selectedQueueItem.vehicleDescription}` : ''}
                     </dd>
                   </div>
                 </dl>
+
+                <div className="mt-3 p-3">
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <MapPin className="h-3.5 w-3.5" aria-hidden />
+                    Location
+                  </p>
+                  <p className="mt-1 text-slate-200">
+                    {selectedQueueItem.locationMode === 'shop' ? 'Shop' : 'Mobile'}
+                    {selectedQueueItem.address ? ` · ${selectedQueueItem.address}` : ''}
+                  </p>
+                  {selectedQueueItem.parkingNotes ? (
+                    <p className="mt-2 text-sm text-slate-300">Parking: {selectedQueueItem.parkingNotes}</p>
+                  ) : null}
+                  {selectedQueueItem.contactNotes ? (
+                    <p className="mt-2 text-sm text-slate-300">Notes: {selectedQueueItem.contactNotes}</p>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 p-3">
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <FileText className="h-3.5 w-3.5" aria-hidden />
+                    Services & add-ons
+                  </p>
+                  {selectedQueueItem.selectedAddonIds.length === 0 ? (
+                    <p className="mt-1 text-slate-500">No add-ons — base package only.</p>
+                  ) : (
+                    <ul className="mt-1 space-y-1.5 border-l border-cyan-500/20 pl-3">
+                      {selectedQueueItem.selectedAddonIds.map((id) => {
+                        const a = getAddonById(id)
+                        return (
+                          <li key={id} className="flex justify-between gap-3 text-sm">
+                            <span className="text-slate-200">{a?.name ?? id}</span>
+                            <span className="shrink-0 font-medium text-cyan-200/90">
+                              {a ? `+$${a.price}` : '—'}
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                  {selectedQueueItem.addonsLineTotal != null && selectedQueueItem.addonsLineTotal > 0 ? (
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Add-ons subtotal: ${selectedQueueItem.addonsLineTotal}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 grid gap-2 p-3 text-xs sm:grid-cols-2 sm:text-sm">
+                  {selectedQueueItem.grandTotal != null ? (
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Est. total</p>
+                      <p className="mt-1 text-slate-200">${selectedQueueItem.grandTotal}</p>
+                    </div>
+                  ) : null}
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Reference</p>
+                    <p className="mt-1 font-mono text-[11px] text-slate-500">{selectedQueueItem.clientReferenceId}</p>
+                  </div>
+                </div>
 
                 {queueModalError ? (
                   <p
