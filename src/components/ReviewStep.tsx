@@ -40,6 +40,7 @@ export function ReviewStep({
   parkingNotes: string
   loyaltyDiscountPercent?: number
 }) {
+  const isLuxury = selectedPackageId === 'full-everything'
   const pkg = getPackageById(selectedPackageId)
   const pkgPrice = resolvePackagePrice(selectedPackageId, vehicleType)
   const addonTotal = computeAddonTotal(selectedAddonIds)
@@ -79,7 +80,7 @@ export function ReviewStep({
         </h3>
         <div className="mt-2 flex justify-between gap-4 font-medium text-white">
           <span>{pkg?.name}</span>
-          <span className="text-cyan-300">{pkgPrice === null ? 'Quote' : `$${pkgPrice}`}</span>
+          <span className="text-cyan-300">{isLuxury ? 'Custom quote' : pkgPrice === null ? 'Quote' : `$${pkgPrice}`}</span>
         </div>
 
         {eligibleAddonIds.length > 0 ? (
@@ -93,7 +94,7 @@ export function ReviewStep({
                 return a ? (
                   <li key={id} className="flex justify-between gap-4 text-slate-400">
                     <span>{a.name}</span>
-                    <span className="text-cyan-200/90">+${a.price}</span>
+                    <span className="text-cyan-200/90">{isLuxury ? 'Selected' : `+$${a.price}`}</span>
                   </li>
                 ) : null
               })}
@@ -123,7 +124,7 @@ export function ReviewStep({
                 return a ? (
                   <li key={id} className="flex justify-between gap-4 text-slate-400">
                     <span>{a.name}</span>
-                    <span className="text-cyan-200/90">+${a.price}</span>
+                    <span className="text-cyan-200/90">{isLuxury ? 'Selected' : `+$${a.price}`}</span>
                   </li>
                 ) : null
               })}
@@ -134,7 +135,9 @@ export function ReviewStep({
         <div className="mt-4 flex justify-between border-t border-white/10 pt-3 text-base font-semibold text-white">
           <span>Estimated total</span>
           <span className="font-display italic text-cyan-300">
-            {grand === null
+            {isLuxury
+              ? 'Custom quote'
+              : grand === null
               ? 'Quote + add-ons'
               : loyalty && loyalty.savings > 0
                 ? `$${loyalty.grandAfterLoyalty ?? grand}`

@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Check } from 'lucide-react'
 import { getAddonById, premiumUpsells } from '../data/services'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
+import { usePremiumUpgradeImages } from '../lib/premiumUpgradeImages'
 
 export function UpsellStep({
   selectedAddonIds,
@@ -15,6 +16,7 @@ export function UpsellStep({
   onDismiss: (premiumId: string) => void
 }) {
   const reduce = usePrefersReducedMotion()
+  const { byAddon } = usePremiumUpgradeImages()
   const visible = premiumUpsells.filter((u) => !dismissedIds.includes(u.id))
   /** Ceramic coating first when present (same visual style as other upsells) */
   const ordered = [
@@ -77,7 +79,7 @@ export function UpsellStep({
                   <div className="relative z-[1]">
                     <div className="relative aspect-[16/10] w-full overflow-hidden bg-slate-900">
                       <img
-                        src={card.image}
+                        src={byAddon[card.addonId]?.[0] || card.image}
                         alt=""
                         className="h-full w-full object-cover"
                         loading="lazy"

@@ -24,6 +24,7 @@ export function OrderSummaryBar({
   /** Punch-card % off (package + non-premium add-ons; Glow-ups excluded). */
   loyaltyDiscountPercent?: number
 }) {
+  const isLuxury = selectedPackageId === 'full-everything'
   const pkg = getPackageById(selectedPackageId)
   const pkgPrice = resolvePackagePrice(selectedPackageId, vehicleType)
   const addonTotal = computeAddonTotal(selectedAddonIds)
@@ -55,7 +56,9 @@ export function OrderSummaryBar({
           return (
             <div key={id} className="flex justify-between gap-2 pl-1">
               <dt className="min-w-0 truncate text-slate-500">{a.name}</dt>
-              <dd className="shrink-0 font-medium text-cyan-200/90">+${a.price}</dd>
+              <dd className="shrink-0 font-medium text-cyan-200/90">
+                {isLuxury ? 'Selected' : `+$${a.price}`}
+              </dd>
             </div>
           )
         })}
@@ -76,7 +79,9 @@ export function OrderSummaryBar({
               return (
                 <div key={id} className="flex justify-between gap-2 pl-1">
                   <dt className="min-w-0 truncate text-slate-500">{a.name}</dt>
-                  <dd className="shrink-0 font-medium text-cyan-200/90">+${a.price}</dd>
+                  <dd className="shrink-0 font-medium text-cyan-200/90">
+                    {isLuxury ? 'Selected' : `+$${a.price}`}
+                  </dd>
                 </div>
               )
             })}
@@ -85,7 +90,9 @@ export function OrderSummaryBar({
         <div className="flex justify-between gap-3 border-t border-white/10 pt-1.5 text-sm">
           <dt className="font-semibold text-white">Est. total</dt>
           <dd className="font-display font-bold italic text-cyan-300">
-            {grand === null
+            {isLuxury
+              ? 'Custom quote'
+              : grand === null
               ? 'Quote + add-ons'
               : loyalty && loyalty.savings > 0
                 ? `$${loyalty.grandAfterLoyalty ?? grand}`

@@ -137,6 +137,9 @@ const ADDON_META = {
   'addon-sub-seat-shampoo': { name: 'Seat shampoo', price: 55 },
   'addon-sub-carpet-shampoo': { name: 'Carpet shampoo', price: 55 },
   'addon-sub-pet-hair': { name: 'Pet hair removal', price: 55 },
+  'addon-luxury-base-interior': { name: 'Interior detail focus', price: 0 },
+  'addon-luxury-base-exterior': { name: 'Exterior detail focus', price: 0 },
+  'addon-luxury-base-full-detail': { name: 'Full detail foundation', price: 0 },
 }
 
 function buildBuiltinAddonMapFromMeta() {
@@ -354,6 +357,16 @@ const PORT = Number(process.env.PORT || 8787)
 const CERAMIC_ADDON_ID = 'addon-ceramic-3yr'
 /** When column A has no year (e.g. "Wednesday, April 1"), assume this year. Booking sheet is 2026. */
 const CALENDAR_YEAR = parseInt(process.env.SHEET_CALENDAR_YEAR || '2026', 10)
+const PREMIUM_IMAGE_ROOT = path.join(process.cwd(), 'data', 'premium-upgrade-images')
+const PREMIUM_IMAGE_ADDON_IDS = new Set([
+  'addon-ceramic-3yr',
+  'addon-interior-deep',
+  'addon-engine',
+  'addon-headlight',
+  'addon-odor',
+])
+const PREMIUM_IMAGE_MAX_PER_ADDON = 5
+const PREMIUM_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 
 const SLOTS = ['10:00', '14:00', '16:00']
 
@@ -966,12 +979,21 @@ async function readSubmittedRequestsValues(sheets) {
 }
 
 /**
- * @returns {{ anyRow: boolean, completedPunches: number, lastName: string, lastEmail: string }}
+ * @returns {{
+ *  anyRow: boolean,
+ *  completedPunches: number,
+ *  lastName: string,
+ *  lastEmail: string,
+ *  lastVehicleTypeLabel: string,
+ *  lastVehicleDescription: string,
+ * }}
  */
 function loyaltySummarizeFromSubmittedRows(values, phoneKey, todayISO) {
   let anyRow = false
   let lastName = ''
   let lastEmail = ''
+  let lastVehicleTypeLabel = ''
+  let lastVehicleDescription = ''
   const punchEvents = []
 
   for (let i = SUBMISSIONS_HEADER_ROWS; i < values.length; i++) {
@@ -997,13 +1019,17 @@ function loyaltySummarizeFromSubmittedRows(values, phoneKey, todayISO) {
     if (rowPhone.length < 7 || rowPhone !== phoneKey) continue
     const name = String(row[SUB_COL_NAME] ?? '').trim()
     const email = String(row[SUB_COL_EMAIL] ?? '').trim()
-    if (name || email) {
+    const vehicleTypeLabel = String(row[5] ?? '').trim()
+    const vehicleDescription = String(row[6] ?? '').trim()
+    if (name || email || vehicleTypeLabel || vehicleDescription) {
       lastName = name
       lastEmail = email
+      lastVehicleTypeLabel = vehicleTypeLabel
+      lastVehicleDescription = vehicleDescription
       break
     }
   }
-  return { anyRow, completedPunches, lastName, lastEmail }
+  return { anyRow, completedPunches, lastName, lastEmail, lastVehicleTypeLabel, lastVehicleDescription }
 }
 
 function loyaltyFirstNameFromFullName(fullName) {
@@ -1486,12 +1512,58 @@ function requireAdmin(req, res, next) {
   return res.status(401).json({ error: 'Unauthorized' })
 }
 
+function ensurePremiumAddonDir(addonId) {
+  const dir = path.join(PREMIUM_IMAGE_ROOT, addonId)
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function safeImageFileEntries(addonId) {
+  const dir = path.join(PREMIUM_IMAGE_ROOT, addonId)
+  if (!fs.existsSync(dir)) return []
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && /\.(png|jpe?g|webp)$/i.test(d.name))
+    .map((d) => {
+      const full = path.join(dir, d.name)
+      const st = fs.statSync(full)
+      return { name: d.name, mtimeMs: st.mtimeMs, full }
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+function premiumImagePublicUrl(addonId, fileName) {
+  return `/api/premium-upgrade-images/file/${encodeURIComponent(addonId)}/${encodeURIComponent(fileName)}`
+}
+
+function premiumImagesPayload() {
+  const byAddon = {}
+  for (const addonId of PREMIUM_IMAGE_ADDON_IDS) {
+    byAddon[addonId] = safeImageFileEntries(addonId).map((f) => premiumImagePublicUrl(addonId, f.name))
+  }
+  return { byAddon, maxPerAddon: PREMIUM_IMAGE_MAX_PER_ADDON }
+}
+
+function decodeImageDataUrl(dataUrl) {
+  const m = String(dataUrl || '').match(/^data:image\/(png|jpeg|jpg|webp);base64,([a-z0-9+/=\s]+)$/i)
+  if (!m) return null
+  const extRaw = m[1].toLowerCase()
+  const ext = extRaw === 'jpeg' ? 'jpg' : extRaw
+  const buf = Buffer.from(m[2].replace(/\s/g, ''), 'base64')
+  if (!buf.length || buf.length > PREMIUM_IMAGE_MAX_BYTES) return null
+  return { ext, buf }
+}
+
+function randomImageName(ext) {
+  return `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`
+}
+
 function createApp() {
   const app = express()
   app.set('trust proxy', 1)
   app.use(rewriteNetlifyFunctionUrl)
   app.use(cors({ origin: true, credentials: true }))
-  app.use(express.json({ limit: '256kb' }))
+  app.use(express.json({ limit: '12mb' }))
   app.use(cookieParser(COOKIE_SECRET))
 
   app.get('/api/health', (_req, res) => {
@@ -1524,6 +1596,21 @@ function createApp() {
       const snap = getBuiltinPricingSnapshot()
       return res.json({ packages: snap.packages, addons: snap.addons })
     }
+  })
+
+  app.get('/api/premium-upgrade-images', (_req, res) => {
+    return res.json(premiumImagesPayload())
+  })
+
+  app.get('/api/premium-upgrade-images/file/:addonId/:fileName', (req, res) => {
+    const addonId = String(req.params.addonId || '')
+    const fileName = String(req.params.fileName || '')
+    if (!PREMIUM_IMAGE_ADDON_IDS.has(addonId)) return res.status(404).end()
+    if (!/^[a-z0-9._-]+\.(png|jpe?g|webp)$/i.test(fileName)) return res.status(404).end()
+    const full = path.join(PREMIUM_IMAGE_ROOT, addonId, fileName)
+    if (!fs.existsSync(full)) return res.status(404).end()
+    res.setHeader('Cache-Control', 'no-store')
+    return res.sendFile(full)
   })
 
   app.get('/api/availability', async (req, res) => {
@@ -1569,7 +1656,14 @@ function createApp() {
     try {
       const sheets = await getSheets()
       const values = await readSubmittedRequestsValues(sheets)
-      const { anyRow, completedPunches, lastName, lastEmail } = loyaltySummarizeFromSubmittedRows(
+      const {
+        anyRow,
+        completedPunches,
+        lastName,
+        lastEmail,
+        lastVehicleTypeLabel,
+        lastVehicleDescription,
+      } = loyaltySummarizeFromSubmittedRows(
         values,
         phoneKey,
         todayIsoCentral(),
@@ -1596,6 +1690,10 @@ function createApp() {
         contactHint: {
           name: lastName,
           email: lastEmail,
+        },
+        vehicleHint: {
+          typeLabel: lastVehicleTypeLabel,
+          description: lastVehicleDescription,
         },
       })
     } catch (err) {
@@ -1784,6 +1882,58 @@ function createApp() {
   app.get('/api/admin/request-queue', requireAdmin, handleAdminGetRequestQueue)
   /** Alias without hyphen (avoids rare proxy/path issues). */
   app.get('/api/admin/queue', requireAdmin, handleAdminGetRequestQueue)
+
+  app.post('/api/admin/premium-upgrade-images/upload', requireAdmin, async (req, res) => {
+    const addonId = String(req.body?.addonId || '').trim()
+    const dataUrl = String(req.body?.dataUrl || '')
+    if (!PREMIUM_IMAGE_ADDON_IDS.has(addonId)) {
+      return res.status(400).json({ error: 'Invalid add-on id' })
+    }
+    const decoded = decodeImageDataUrl(dataUrl)
+    if (!decoded) {
+      return res.status(400).json({ error: 'Invalid image. Use PNG/JPG/WEBP under 8MB.' })
+    }
+    try {
+      const dir = ensurePremiumAddonDir(addonId)
+      const name = randomImageName(decoded.ext)
+      fs.writeFileSync(path.join(dir, name), decoded.buf)
+
+      const entries = safeImageFileEntries(addonId)
+      for (const extra of entries.slice(PREMIUM_IMAGE_MAX_PER_ADDON)) {
+        try {
+          fs.unlinkSync(extra.full)
+        } catch {
+          /* ignore */
+        }
+      }
+      return res.json({ ok: true, ...premiumImagesPayload() })
+    } catch (err) {
+      console.error(err)
+      return res.status(500).json({ error: 'Could not save image' })
+    }
+  })
+
+  app.post('/api/admin/premium-upgrade-images/delete', requireAdmin, async (req, res) => {
+    const addonId = String(req.body?.addonId || '').trim()
+    const url = String(req.body?.url || '')
+    if (!PREMIUM_IMAGE_ADDON_IDS.has(addonId)) {
+      return res.status(400).json({ error: 'Invalid add-on id' })
+    }
+    const m = url.match(/\/api\/premium-upgrade-images\/file\/[^/]+\/([^/?#]+)/)
+    if (!m) return res.status(400).json({ error: 'Invalid image url' })
+    const fileName = decodeURIComponent(m[1])
+    if (!/^[a-z0-9._-]+\.(png|jpe?g|webp)$/i.test(fileName)) {
+      return res.status(400).json({ error: 'Invalid image filename' })
+    }
+    const full = path.join(PREMIUM_IMAGE_ROOT, addonId, fileName)
+    try {
+      if (fs.existsSync(full)) fs.unlinkSync(full)
+      return res.json({ ok: true, ...premiumImagesPayload() })
+    } catch (err) {
+      console.error(err)
+      return res.status(500).json({ error: 'Could not delete image' })
+    }
+  })
 
   app.post('/api/admin/request-queue/accept', requireAdmin, async (req, res) => {
     try {

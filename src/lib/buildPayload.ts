@@ -116,7 +116,8 @@ export function buildRequestPayload(input: {
     input.selectedPackageId,
     input.vehicle.type,
   )
-  const addonsLineAmount = computeAddonTotal(input.selectedAddonIds)
+  const addonsLineAmount =
+    input.selectedPackageId === 'full-everything' ? 0 : computeAddonTotal(input.selectedAddonIds)
   const grandTotal = computeGrandTotal(packagePrice, addonsLineAmount)
 
   return {

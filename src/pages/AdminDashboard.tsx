@@ -21,7 +21,7 @@ import {
   parseCalendarBookingLabel,
 } from '../lib/adminConfirmationMessage'
 import { buildSmsMessagesUrl } from '../lib/smsHref'
-import { getAddonById, getPackageById, resolvePackagePrice } from '../data/services'
+import { getAddonById, getPackageById, premiumUpsells, resolvePackagePrice } from '../data/services'
 import {
   PREFERRED_TIME_OPTIONS,
   labelPreferredTime,
@@ -61,6 +61,17 @@ type Row = {
   row: number
   slots: Record<string, SlotState>
 }
+
+type PremiumImageState = {
+  byAddon: Record<string, string[]>
+  maxPerAddon: number
+}
+
+const PREMIUM_IMAGE_OPTIONS = premiumUpsells.map((u) => ({
+  addonId: u.addonId,
+  title: u.title,
+  fallbackImage: u.image,
+}))
 
 const SLOT_KEYS: PreferredTimeSlot[] = ['10:00', '14:00', '16:00']
 
@@ -414,6 +425,9 @@ export function AdminDashboard() {
   const [selectedQueueItem, setSelectedQueueItem] = useState<QueuePendingItem | null>(null)
   const [queueModalError, setQueueModalError] = useState<string | null>(null)
   const [queueBusy, setQueueBusy] = useState<string | null>(null)
+  const [premiumImages, setPremiumImages] = useState<PremiumImageState>({ byAddon: {}, maxPerAddon: 5 })
+  const [premiumImagesBusy, setPremiumImagesBusy] = useState<string | null>(null)
+  const [premiumImagesError, setPremiumImagesError] = useState<string | null>(null)
   const [calendarView, setCalendarView] = useState<'list' | 'grid'>('list')
 
   const refresh = useCallback(async () => {
@@ -459,6 +473,19 @@ export function AdminDashboard() {
         }
       }
       setLoggedIn(true)
+      try {
+        const imgRes = await fetch('/api/premium-upgrade-images', { credentials: 'include' })
+        const imgData = await imgRes.json().catch(() => ({}))
+        if (imgRes.ok) {
+          setPremiumImages({
+            byAddon: imgData.byAddon && typeof imgData.byAddon === 'object' ? imgData.byAddon : {},
+            maxPerAddon: typeof imgData.maxPerAddon === 'number' ? imgData.maxPerAddon : 5,
+          })
+          setPremiumImagesError(null)
+        }
+      } catch {
+        /* ignore image panel fetch failures */
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -712,6 +739,60 @@ export function AdminDashboard() {
     }
   }
 
+  async function uploadPremiumImage(addonId: string, file: File) {
+    const key = `upload-${addonId}`
+    setPremiumImagesBusy(key)
+    setPremiumImagesError(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = () => reject(new Error('Could not read image'))
+        reader.readAsDataURL(file)
+      })
+      const res = await fetch('/api/admin/premium-upgrade-images/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ addonId, dataUrl }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Upload failed')
+      setPremiumImages({
+        byAddon: data.byAddon && typeof data.byAddon === 'object' ? data.byAddon : {},
+        maxPerAddon: typeof data.maxPerAddon === 'number' ? data.maxPerAddon : 5,
+      })
+    } catch (e) {
+      setPremiumImagesError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setPremiumImagesBusy(null)
+    }
+  }
+
+  async function deletePremiumImage(addonId: string, url: string) {
+    const key = `delete-${addonId}-${url}`
+    setPremiumImagesBusy(key)
+    setPremiumImagesError(null)
+    try {
+      const res = await fetch('/api/admin/premium-upgrade-images/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ addonId, url }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Delete failed')
+      setPremiumImages({
+        byAddon: data.byAddon && typeof data.byAddon === 'object' ? data.byAddon : {},
+        maxPerAddon: typeof data.maxPerAddon === 'number' ? data.maxPerAddon : 5,
+      })
+    } catch (e) {
+      setPremiumImagesError(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setPremiumImagesBusy(null)
+    }
+  }
+
   const sorted = useMemo(() => [...rows].sort((a, b) => a.date.localeCompare(b.date)), [rows])
 
   const rowByDate = useMemo(() => {
@@ -912,6 +993,86 @@ export function AdminDashboard() {
               ))}
             </ul>
           ) : null}
+        </section>
+
+        <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+          <h2 className="font-display text-base font-bold italic text-slate-100 sm:text-lg">
+            Premium Upgrade Images
+          </h2>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400 sm:text-sm">
+            Upload up to {premiumImages.maxPerAddon} images for each premium upgrade. New uploads replace
+            the oldest once full.
+          </p>
+          {premiumImagesError ? (
+            <p
+              role="alert"
+              className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+            >
+              {premiumImagesError}
+            </p>
+          ) : null}
+          <div className="mt-4 space-y-4">
+            {PREMIUM_IMAGE_OPTIONS.map((opt) => {
+              const urls = premiumImages.byAddon[opt.addonId] ?? []
+              const busyForAddon = premiumImagesBusy?.includes(opt.addonId) ?? false
+              return (
+                <article key={opt.addonId} className="rounded-xl border border-white/10 bg-black/25 p-3 sm:p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-white">{opt.title}</p>
+                      <p className="text-xs text-slate-500">{opt.addonId}</p>
+                    </div>
+                    <label className="cursor-pointer rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20">
+                      {busyForAddon ? 'Uploading…' : 'Add image'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        disabled={Boolean(premiumImagesBusy)}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) void uploadPremiumImage(opt.addonId, file)
+                          e.currentTarget.value = ''
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                    {(urls.length ? urls : [opt.fallbackImage]).map((url, idx) => {
+                      const isFallback = urls.length === 0
+                      return (
+                        <div key={`${opt.addonId}-${url}-${idx}`} className="relative overflow-hidden rounded-lg border border-white/10 bg-black/35">
+                          <img
+                            src={url}
+                            alt=""
+                            className="aspect-square w-full object-cover"
+                            loading="lazy"
+                          />
+                          {isFallback ? (
+                            <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-slate-300">
+                              Default
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={Boolean(premiumImagesBusy)}
+                              onClick={() => void deletePremiumImage(opt.addonId, url)}
+                              className="absolute right-1 top-1 rounded bg-black/70 p-1 text-slate-200 hover:bg-black/90 disabled:opacity-40"
+                              aria-label="Delete image"
+                              title="Delete image"
+                            >
+                              <X className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden />
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </article>
+              )
+            })}
+          </div>
         </section>
 
         <div className="mt-6">

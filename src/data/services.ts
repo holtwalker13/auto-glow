@@ -109,20 +109,20 @@ export const packages: ServicePackage[] = [
   },
   {
     id: 'full-everything',
-    name: 'Full Everything',
-    tagline: 'Maximum glow — bundled interior, exterior & curated extras',
-    price: 700,
+    name: 'Luxury Auto Glow',
+    tagline: 'Tailor-made premium package with custom bid',
+    price: null,
     sections: [
       {
-        title: 'The works',
+        title: 'Premium build-out',
         items: [
-          'Full interior and exterior detail baseline',
-          'Curated add-ons bundled into one simple price',
-          'Best value when you were stacking multiple upgrades',
+          'Built around your vehicle and goals',
+          'Premium upgrades selected à la carte',
+          'Final amount is quoted after service mix + vehicle condition review',
         ],
       },
     ],
-    intro: 'One package when you want it all handled together.',
+    intro: 'For clients who want a custom luxury plan instead of a fixed package.',
   },
 ]
 
@@ -161,14 +161,14 @@ export const SUB_ADDON_ID_SET = new Set(SUB_ADDON_LIST.map((a) => a.id))
 export function getSubAddonsForPackage(packageId: string): Addon[] {
   if (packageId === 'exterior-detail') return [...subAddonsExterior]
   if (packageId === 'interior-detail') return [...subAddonsInterior]
-  if (packageId === 'full-detail' || packageId === 'full-everything') {
+  if (packageId === 'full-detail') {
     return [...subAddonsExterior, ...subAddonsInterior]
   }
   return []
 }
 
 export function packageUsesTwoPhaseSubAddons(packageId: string): boolean {
-  return packageId === 'full-detail' || packageId === 'full-everything'
+  return packageId === 'full-detail'
 }
 
 /** Punch-card copy: interior/exterior packages → "cleaning"; full packages → "detail". */
@@ -261,6 +261,14 @@ export const premiumUpsells: PremiumUpsell[] = [
 
 /** Glow-up card addon IDs — punch-card % off applies to package + add-ons outside this set only. */
 export const PREMIUM_UPSELL_ADDON_ID_SET = new Set(premiumUpsells.map((u) => u.addonId))
+export const LUXURY_AUTO_GLOW_SELECTION_OPTION_IDS = [
+  'addon-luxury-base-interior',
+  'addon-luxury-base-exterior',
+  'addon-luxury-base-full-detail',
+] as const
+export const LUXURY_AUTO_GLOW_SELECTION_OPTION_ID_SET = new Set<string>(
+  LUXURY_AUTO_GLOW_SELECTION_OPTION_IDS as readonly string[],
+)
 
 /** Premium-only addon not listed in main ala carte checklist */
 export const premiumOnlyAddons: Addon[] = [
@@ -270,6 +278,9 @@ export const premiumOnlyAddons: Addon[] = [
     price: 899,
     description: 'Includes full decon, application, and inspection per process below.',
   },
+  { id: 'addon-luxury-base-interior', name: 'Interior detail focus', price: 0 },
+  { id: 'addon-luxury-base-exterior', name: 'Exterior detail focus', price: 0 },
+  { id: 'addon-luxury-base-full-detail', name: 'Full detail foundation', price: 0 },
 ]
 
 export function getAddonById(id: string): Addon | undefined {
@@ -299,6 +310,7 @@ export function resolvePackagePrice(
   vehicleType: VehicleType | '',
 ): number | null {
   if (!getPackageById(packageId)) return null
+  if (packageId === 'full-everything') return null
   if (vehicleType) {
     const v = getClientPackagePrice(packageId, vehicleType)
     if (v != null) return v

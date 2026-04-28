@@ -19,6 +19,7 @@ export type LoyaltyLookupResult = {
   /** First name from job history (for greetings). */
   firstName: string
   contactHint: { name: string; email: string }
+  vehicleHint: { typeLabel: string; description: string }
 }
 
 export function ReturningCustomerLoyaltyScreen({
@@ -88,6 +89,11 @@ export function ReturningCustomerLoyaltyScreen({
         contactHint: {
           name: hintName,
           email: typeof data.contactHint?.email === 'string' ? data.contactHint.email : '',
+        },
+        vehicleHint: {
+          typeLabel: typeof data.vehicleHint?.typeLabel === 'string' ? data.vehicleHint.typeLabel : '',
+          description:
+            typeof data.vehicleHint?.description === 'string' ? data.vehicleHint.description : '',
         },
       }
       setLoyalty(nextLoyalty)

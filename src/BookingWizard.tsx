@@ -14,22 +14,21 @@ import {
   ReturningCustomerLoyaltyScreen,
   type LoyaltyLookupResult,
 } from './components/ReturningCustomerLoyaltyScreen'
-import { FullEverythingUpsellModal } from './components/FullEverythingUpsellModal'
 import { OrderSummaryBar } from './components/OrderSummaryBar'
 import { LogisticsStep } from './components/LogisticsStep'
 import { ReviewStep } from './components/ReviewStep'
 import { ServiceStep } from './components/ServiceStep'
 import { SubAddonsModal } from './components/SubAddonsModal'
 import { SuccessScreen } from './components/SuccessScreen'
-import { UpsellStep } from './components/UpsellStep'
 import { VehicleStep } from './components/VehicleStep'
 import { countFreeSlots } from './lib/calendarAvailability'
 import {
   addons,
   getSubAddonsForPackage,
+  LUXURY_AUTO_GLOW_SELECTION_OPTION_ID_SET,
   loyaltyDiscountScopeWord,
   packages,
-  premiumUpsells,
+  PREMIUM_UPSELL_ADDON_ID_SET,
   SUB_ADDON_ID_SET,
 } from './data/services'
 import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion'
@@ -48,17 +47,11 @@ import type {
   RequestPayload,
   VehicleType,
 } from './types/request'
+import { vehicleTypeFromSheetLabel } from './types/request'
 
 const CERAMIC_ADDON_ID = 'addon-ceramic-3yr'
 
-const STEP_LABELS = [
-  'Contact',
-  'Vehicle',
-  'Services',
-  'Glow-ups',
-  'Schedule',
-  'Review',
-] as const
+const STEP_LABELS = ['Contact', 'Vehicle', 'Services', 'Schedule', 'Review'] as const
 
 const defaultPackageId =
   packages.find((p) => p.defaultSelected)?.id ?? packages[0]?.id ?? 'full-detail'
@@ -155,7 +148,6 @@ export default function BookingWizard() {
   const [submitting, setSubmitting] = useState(false)
   const [availabilityLoading, setAvailabilityLoading] = useState(false)
   const [subAddonsOpen, setSubAddonsOpen] = useState(false)
-  const [fullEverythingOpen, setFullEverythingOpen] = useState(false)
   const [subFlowCompletedKey, setSubFlowCompletedKey] = useState('')
   const [pendingInQueue, setPendingInQueue] = useState(false)
   const [flowPhase, setFlowPhase] = useState<FlowPhase>('gate')
@@ -178,20 +170,6 @@ export default function BookingWizard() {
   }, [entryKind, loyaltySnapshot])
 
   const hasCeramic = selectedAddonIds.includes(CERAMIC_ADDON_ID)
-
-  const addAddon = useCallback((id: string) => {
-    setSelectedAddonIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
-  }, [])
-
-  const dismissPremium = useCallback((premiumCardId: string) => {
-    const addonId = premiumUpsells.find((u) => u.id === premiumCardId)?.addonId
-    setDismissedPremiumIds((prev) =>
-      prev.includes(premiumCardId) ? prev : [...prev, premiumCardId],
-    )
-    if (addonId) {
-      setSelectedAddonIds((prev) => prev.filter((x) => x !== addonId))
-    }
-  }, [])
 
   useEffect(() => {
     setSelectedAddonIds((prev) =>
@@ -272,7 +250,7 @@ export default function BookingWizard() {
       if (!vehicleType) return 'Pick a vehicle type.'
       if (!vehicleDescription.trim()) return 'Tell us about your vehicle (make, model, etc.).'
     }
-    if (step === 4) {
+    if (step === 3) {
       if (!preferredDate) return 'Choose a preferred date.'
       if (slotAvailability === null) return 'Loading availability…'
       const n = countFreeSlots(slotAvailability)
@@ -289,7 +267,7 @@ export default function BookingWizard() {
         if (a?.status === 'booked') return 'That time was just taken — pick another slot.'
       }
     }
-    if (step === 5) {
+    if (step === 4) {
       if (!contact.name.trim()) return 'Please enter your name.'
       if (!isValidEmail(contact.email)) return 'Please enter a valid email.'
       if (phoneDigitsOnly(contact.phone).length < 7)
@@ -321,21 +299,10 @@ export default function BookingWizard() {
     goNext()
   }
 
-  function shouldOfferFullEverything(packageId: string, addonIds: string[]) {
-    const n = addonIds.length
-    if (n >= 3) return true
-    if (packageId === 'full-detail' && n >= 1) return true
-    return false
-  }
-
   function proceedAfterSubAddons() {
     setSubAddonsOpen(false)
     setSubFlowCompletedKey(subFlowKey)
-    if (shouldOfferFullEverything(selectedPackageId, selectedAddonIds)) {
-      setFullEverythingOpen(true)
-    } else {
-      setStep(3)
-    }
+    setStep(3)
   }
 
   function stripAllSubAddons() {
@@ -348,17 +315,10 @@ export default function BookingWizard() {
     )
   }
 
-  function acceptFullEverything() {
-    setSelectedPackageId('full-everything')
-    setSelectedAddonIds((prev) => prev.filter((id) => id === CERAMIC_ADDON_ID))
-    setFullEverythingOpen(false)
-    setSubFlowCompletedKey(`full-everything:${vehicleType}`)
-    setStep(3)
-  }
-
-  function declineFullEverything() {
-    setFullEverythingOpen(false)
-    setStep(3)
+  function togglePremiumAddon(addonId: string) {
+    setSelectedAddonIds((prev) =>
+      prev.includes(addonId) ? prev.filter((x) => x !== addonId) : [...prev, addonId],
+    )
   }
 
   function goNext() {
@@ -459,7 +419,6 @@ export default function BookingWizard() {
     setSubmitError(null)
     setPendingInQueue(false)
     setSubAddonsOpen(false)
-    setFullEverythingOpen(false)
     setSubFlowCompletedKey('')
     setFlowPhase('gate')
     setEntryKind(null)
@@ -481,6 +440,8 @@ export default function BookingWizard() {
   }
 
   const applyReturningToBooking = useCallback((phone: string, loyalty: LoyaltyLookupResult) => {
+    const hintedVehicleType = vehicleTypeFromSheetLabel(loyalty.vehicleHint.typeLabel || '')
+    const hintedVehicleDescription = (loyalty.vehicleHint.description || '').trim()
     setEntryKind('returning')
     setLoyaltySnapshot(loyalty)
     setContact((c) => ({
@@ -489,6 +450,12 @@ export default function BookingWizard() {
       name: loyalty.contactHint.name || c.name,
       email: loyalty.contactHint.email || c.email,
     }))
+    if (hintedVehicleType) setVehicleType(hintedVehicleType)
+    if (hintedVehicleDescription) setVehicleDescription(hintedVehicleDescription)
+    setSelectedAddonIds([])
+    setDismissedPremiumIds([])
+    setSubFlowCompletedKey('')
+    setStep(2)
     setFlowPhase('booking')
   }, [])
 
@@ -620,12 +587,7 @@ export default function BookingWizard() {
     ? { duration: 0 }
     : { type: 'spring' as const, stiffness: 380, damping: 34 }
 
-  const bottomPad =
-    step === 2
-      ? 'pb-[11.5rem]'
-      : step === 3
-        ? 'pb-[21rem] max-[480px]:pb-[22rem]'
-        : 'pb-28'
+  const bottomPad = step === 2 ? 'pb-[18rem] max-[480px]:pb-[20rem]' : 'pb-28'
 
   const returningWelcome =
     entryKind === 'returning' && contact.name.trim()
@@ -723,9 +685,7 @@ export default function BookingWizard() {
 
       <div className="form-ambient-layer" aria-hidden />
 
-      <main
-        className={`relative z-10 mx-auto max-w-lg px-4 pt-5 ${step === 3 ? 'overflow-x-clip' : ''}`}
-      >
+      <main className="relative z-10 mx-auto max-w-lg px-4 pt-5">
         {validationError && step > 1 ? (
           <p className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100/90">
             {validationError}
@@ -762,21 +722,25 @@ export default function BookingWizard() {
               <ServiceStep
                 vehicleType={vehicleType}
                 selectedPackageId={selectedPackageId}
+                selectedAddonIds={selectedAddonIds}
+                onTogglePremiumAddon={togglePremiumAddon}
                 onPackageChange={(id) => {
                   setSelectedPackageId(id)
                   setSubFlowCompletedKey('')
+                  if (id !== 'full-everything') {
+                    setSelectedAddonIds((prev) =>
+                      prev.filter(
+                        (x) =>
+                          !PREMIUM_UPSELL_ADDON_ID_SET.has(x) &&
+                          !LUXURY_AUTO_GLOW_SELECTION_OPTION_ID_SET.has(x),
+                      ),
+                    )
+                    setDismissedPremiumIds([])
+                  }
                 }}
               />
             ) : null}
             {step === 3 ? (
-              <UpsellStep
-                selectedAddonIds={selectedAddonIds}
-                dismissedIds={dismissedPremiumIds}
-                onAddAddon={addAddon}
-                onDismiss={dismissPremium}
-              />
-            ) : null}
-            {step === 4 ? (
               <LogisticsStep
                 preferredDate={preferredDate}
                 onScheduleDayPick={(date, slots) => {
@@ -801,7 +765,7 @@ export default function BookingWizard() {
                 availabilityLoading={availabilityLoading}
               />
             ) : null}
-            {step === 5 ? (
+            {step === 4 ? (
               <ReviewStep
                 contact={contact}
                 vehicleType={vehicleType}
@@ -823,7 +787,7 @@ export default function BookingWizard() {
 
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/10 bg-black px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="mx-auto max-w-lg">
-          {step === 2 || step === 3 ? (
+          {step === 2 ? (
             <OrderSummaryBar
               vehicleType={vehicleType}
               selectedPackageId={selectedPackageId}
@@ -871,12 +835,6 @@ export default function BookingWizard() {
         onToggleAddon={toggleSubAddon}
         onSkipAll={stripAllSubAddons}
         onComplete={proceedAfterSubAddons}
-      />
-      <FullEverythingUpsellModal
-        open={fullEverythingOpen}
-        vehicleType={vehicleType}
-        onAccept={acceptFullEverything}
-        onDecline={declineFullEverything}
       />
       </div>
       {consentModalEl}
