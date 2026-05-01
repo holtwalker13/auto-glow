@@ -924,9 +924,11 @@ function buildSubmissionDataRow(body, calendarLabel) {
   const loc =
     body.locationMode === 'shop'
       ? 'Shop'
-      : body.locationMode === 'mobile'
-        ? 'Mobile — at your location'
-        : String(body.locationMode || '')
+      : body.locationMode === 'mobile-detailing'
+        ? 'Mobile detailing — we come to you'
+        : body.locationMode === 'mobile'
+          ? 'Mobile — at your location'
+          : String(body.locationMode || '')
   const dismissed = Array.isArray(body.dismissedPremiumIds) ? body.dismissedPremiumIds.join(' | ') : ''
 
   return [
@@ -986,6 +988,7 @@ async function readSubmittedRequestsValues(sheets) {
  *  lastEmail: string,
  *  lastVehicleTypeLabel: string,
  *  lastVehicleDescription: string,
+ *  lastContactNotes: string,
  * }}
  */
 function loyaltySummarizeFromSubmittedRows(values, phoneKey, todayISO) {
@@ -994,6 +997,7 @@ function loyaltySummarizeFromSubmittedRows(values, phoneKey, todayISO) {
   let lastEmail = ''
   let lastVehicleTypeLabel = ''
   let lastVehicleDescription = ''
+  let lastContactNotes = ''
   const punchEvents = []
 
   for (let i = SUBMISSIONS_HEADER_ROWS; i < values.length; i++) {
@@ -1026,10 +1030,19 @@ function loyaltySummarizeFromSubmittedRows(values, phoneKey, todayISO) {
       lastEmail = email
       lastVehicleTypeLabel = vehicleTypeLabel
       lastVehicleDescription = vehicleDescription
+      lastContactNotes = String(row[SUB_COL_NOTES] ?? '').trim()
       break
     }
   }
-  return { anyRow, completedPunches, lastName, lastEmail, lastVehicleTypeLabel, lastVehicleDescription }
+  return {
+    anyRow,
+    completedPunches,
+    lastName,
+    lastEmail,
+    lastVehicleTypeLabel,
+    lastVehicleDescription,
+    lastContactNotes,
+  }
 }
 
 function loyaltyFirstNameFromFullName(fullName) {
@@ -1399,7 +1412,11 @@ function bookingBodyFromSubmissionRow(row) {
   const timeLabel = String(row[SUB_COL_TIME_LABEL] ?? '').trim()
   const preferredTimeSlot = queueTimeCellToPreferredSlot(timeLabel, fullDay, selectedAddonIds)
   const loc = String(row[SUB_COL_LOCATION] ?? '').trim()
-  const locationMode = loc.startsWith('Shop') ? 'shop' : 'mobile'
+  const locationMode = loc.startsWith('Shop')
+    ? 'shop'
+    : loc.includes('Mobile detailing')
+      ? 'mobile-detailing'
+      : 'mobile'
   const vtLabel = String(row[5] ?? '').trim()
   const vehicleType = VEHICLE_LABEL_TO_TYPE[vtLabel] || 'car'
 
@@ -1663,6 +1680,7 @@ function createApp() {
         lastEmail,
         lastVehicleTypeLabel,
         lastVehicleDescription,
+        lastContactNotes,
       } = loyaltySummarizeFromSubmittedRows(
         values,
         phoneKey,
@@ -1690,6 +1708,7 @@ function createApp() {
         contactHint: {
           name: lastName,
           email: lastEmail,
+          ...(lastContactNotes ? { notes: lastContactNotes } : {}),
         },
         vehicleHint: {
           typeLabel: lastVehicleTypeLabel,
@@ -2068,6 +2087,7 @@ function createApp() {
             phone: String(row[SUB_COL_PHONE] ?? '').trim(),
             email: String(row[SUB_COL_EMAIL] ?? '').trim(),
             name: String(row[SUB_COL_NAME] ?? '').trim(),
+            packageId: String(row[SUB_COL_PACKAGE_ID] ?? '').trim(),
           })
         }
       }

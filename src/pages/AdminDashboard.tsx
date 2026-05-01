@@ -415,7 +415,7 @@ export function AdminDashboard() {
   const [modalSheetError, setModalSheetError] = useState<string | null>(null)
   const [contactLookup, setContactLookup] = useState<{
     loading: boolean
-    data: { phone: string; email: string; name: string } | null
+    data: { phone: string; email: string; name: string; packageId?: string } | null
     missing: boolean
     /** Log row matched date + label but Phone/Email columns are blank */
     rowWithoutContact: boolean
@@ -546,17 +546,18 @@ export function AdminDashboard() {
           const phone = String(d.phone ?? '').trim()
           const email = String(d.email ?? '').trim()
           const name = String(d.name ?? '').trim()
+          const packageId = String(d.packageId ?? '').trim()
           if (phone || email) {
             setContactLookup({
               loading: false,
-              data: { phone, email, name },
+              data: { phone, email, name, ...(packageId ? { packageId } : {}) },
               missing: false,
               rowWithoutContact: false,
             })
           } else {
             setContactLookup({
               loading: false,
-              data: name ? { phone: '', email: '', name } : null,
+              data: name ? { phone: '', email: '', name, ...(packageId ? { packageId } : {}) } : null,
               missing: false,
               rowWithoutContact: true,
             })
@@ -582,8 +583,9 @@ export function AdminDashboard() {
       datePretty: selectedBooking.row.dateLabel ?? selectedBooking.row.date,
       slots: selectedBooking.slots,
       submittedContactName: contactLookup.data?.name,
+      packageId: contactLookup.data?.packageId,
     })
-  }, [selectedBooking, contactLookup.data?.name])
+  }, [selectedBooking, contactLookup.data?.name, contactLookup.data?.packageId])
 
   const messagesUrl = useMemo(() => {
     if (!confirmationDraft || !contactLookup.data?.phone) return null
@@ -995,11 +997,14 @@ export function AdminDashboard() {
           ) : null}
         </section>
 
-        <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-          <h2 className="font-display text-base font-bold italic text-slate-100 sm:text-lg">
+        <details className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+          <summary className="cursor-pointer list-none text-base font-bold italic text-slate-100 sm:text-lg">
             Premium Upgrade Images
-          </h2>
-          <p className="mt-1 text-xs leading-relaxed text-slate-400 sm:text-sm">
+            <span className="ml-2 text-xs not-italic font-normal text-slate-500">
+              (expand if needed)
+            </span>
+          </summary>
+          <p className="mt-3 text-xs leading-relaxed text-slate-400 sm:text-sm">
             Upload up to {premiumImages.maxPerAddon} images for each premium upgrade. New uploads replace
             the oldest once full.
           </p>
@@ -1073,7 +1078,7 @@ export function AdminDashboard() {
               )
             })}
           </div>
-        </section>
+        </details>
 
         <div className="mt-6">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1666,7 +1671,11 @@ export function AdminDashboard() {
                     Location
                   </p>
                   <p className="mt-1 text-slate-200">
-                    {selectedQueueItem.locationMode === 'shop' ? 'Shop' : 'Mobile'}
+                    {selectedQueueItem.locationMode === 'shop'
+                      ? 'Shop'
+                      : selectedQueueItem.locationMode === 'mobile-detailing'
+                        ? 'Mobile detailing (we come to you)'
+                        : 'Mobile pickup'}
                     {selectedQueueItem.address ? ` · ${selectedQueueItem.address}` : ''}
                   </p>
                   {selectedQueueItem.parkingNotes ? (

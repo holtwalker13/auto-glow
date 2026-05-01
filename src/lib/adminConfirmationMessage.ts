@@ -17,6 +17,8 @@ export function buildCustomerConfirmationMessage(input: {
   slots: PreferredTimeSlot[]
   /** From booking submission log — avoids mashing name + vehicle into the greeting */
   submittedContactName?: string
+  /** When set, uses custom-quote follow-up copy instead of the standard booking template. */
+  packageId?: string
 }): string {
   const parsed = parseCalendarBookingLabel(input.calendarLabel)
   const rawName = (input.submittedContactName?.trim() || parsed.name).trim()
@@ -24,6 +26,18 @@ export function buildCustomerConfirmationMessage(input: {
   const greet =
     firstName && firstName.toLowerCase() !== 'customer' ? `Hi ${firstName},` : 'Hello,'
   const detail = parsed.detail
+
+  if (input.packageId === 'full-everything') {
+    return `${greet}
+
+Thank you for your custom quote request with Jackson Auto Glow — we have your submission and appreciate you reaching out.
+
+When you have a moment, please reply with any extra details we should know about your vehicle (year, make, model, condition, location, timeline, or anything else that helps us build an accurate quote).
+
+We will follow up soon.
+
+— Jackson Auto Glow`
+  }
 
   let scheduleSentence: string
   if (input.slots.length >= 3) {

@@ -1,30 +1,17 @@
-import { useState, type FormEvent } from 'react'
+import { useLayoutEffect, useState, type FormEvent } from 'react'
 import { CustomerDataConsentModal } from './CustomerDataConsentModal'
 import { formatUsPhoneInput, phoneDigitsOnly } from '../lib/formatUsPhone'
+import { loyaltyLookupResultFromApi } from '../lib/loyaltyLookupParse'
 import { hasActiveReturningPhoneLoginConsent, persistAllCustomerConsents } from '../lib/customerConsentStorage'
 import { firstNameFromFullName } from '../lib/personName'
+import type { LoyaltyLookupResult } from '../types/loyalty'
 
-const DEFAULT_LOYALTY_TIER_LABELS = ['10% off', '15% off', '20% off', '25% off', '30% off'] as const
-
-export type LoyaltyLookupResult = {
-  recognized: boolean
-  completedPunches: number
-  punchesOnCard: number
-  maxPunches: number
-  nextDiscountPercent: number
-  tierLabels: string[]
-  /** Shown when we recognize the phone; explains 365-day rolling reset. */
-  annualResetNote?: string
-  message: string
-  /** First name from job history (for greetings). */
-  firstName: string
-  contactHint: { name: string; email: string }
-  vehicleHint: { typeLabel: string; description: string }
-}
+export type { LoyaltyLookupResult }
 
 export function ReturningCustomerLoyaltyScreen({
   initialPhone,
   welcomeFirstNameHint,
+  initialLoyaltyFromLookup,
   onBack,
   onContinueToBooking,
   onWelcomeNameResolved,
@@ -32,6 +19,8 @@ export function ReturningCustomerLoyaltyScreen({
   initialPhone: string
   /** e.g. when coming back from booking with contact already filled */
   welcomeFirstNameHint?: string
+  /** When set (e.g. new-customer path matched an existing phone), show punch card without a second lookup. */
+  initialLoyaltyFromLookup?: LoyaltyLookupResult | null
   onBack: () => void
   onContinueToBooking: (phone: string, loyalty: LoyaltyLookupResult) => void
   /** Called after a successful lookup so the shell header can match the greeting. */
@@ -43,6 +32,14 @@ export function ReturningCustomerLoyaltyScreen({
   const [loyalty, setLoyalty] = useState<LoyaltyLookupResult | null>(null)
   /** After a successful lookup, block punch card until returning-phone + marketing consent is stored. */
   const [postLookupConsentOpen, setPostLookupConsentOpen] = useState(false)
+
+  useLayoutEffect(() => {
+    if (!initialLoyaltyFromLookup) return
+    setLoyalty(initialLoyaltyFromLookup)
+    onWelcomeNameResolved?.(initialLoyaltyFromLookup.firstName)
+    setPostLookupConsentOpen(!hasActiveReturningPhoneLoginConsent())
+    setError(null)
+  }, [initialLoyaltyFromLookup, onWelcomeNameResolved])
 
   async function runLookup() {
     const d = phoneDigitsOnly(phone)
@@ -68,36 +65,9 @@ export function ReturningCustomerLoyaltyScreen({
         onWelcomeNameResolved?.(firstNameFromFullName(welcomeFirstNameHint ?? ''))
         return
       }
-      const hintName = typeof data.contactHint?.name === 'string' ? data.contactHint.name : ''
-      const resolvedFirst =
-        (typeof data.firstName === 'string' ? data.firstName : '').trim() ||
-        firstNameFromFullName(hintName)
-      const nextLoyalty: LoyaltyLookupResult = {
-        recognized: Boolean(data.recognized),
-        completedPunches: Number(data.completedPunches) || 0,
-        punchesOnCard: Number(data.punchesOnCard) || 0,
-        maxPunches: Number(data.maxPunches) || 5,
-        nextDiscountPercent: Number(data.nextDiscountPercent) || 0,
-        tierLabels:
-          Array.isArray(data.tierLabels) && data.tierLabels.length > 0
-            ? data.tierLabels
-            : [...DEFAULT_LOYALTY_TIER_LABELS],
-        annualResetNote:
-          typeof data.annualResetNote === 'string' ? data.annualResetNote.trim() : '',
-        message: typeof data.message === 'string' ? data.message : '',
-        firstName: resolvedFirst,
-        contactHint: {
-          name: hintName,
-          email: typeof data.contactHint?.email === 'string' ? data.contactHint.email : '',
-        },
-        vehicleHint: {
-          typeLabel: typeof data.vehicleHint?.typeLabel === 'string' ? data.vehicleHint.typeLabel : '',
-          description:
-            typeof data.vehicleHint?.description === 'string' ? data.vehicleHint.description : '',
-        },
-      }
+      const nextLoyalty = loyaltyLookupResultFromApi(data)
       setLoyalty(nextLoyalty)
-      onWelcomeNameResolved?.(resolvedFirst)
+      onWelcomeNameResolved?.(nextLoyalty.firstName)
       setPostLookupConsentOpen(!hasActiveReturningPhoneLoginConsent())
     } catch {
       setError('Network error — check your connection and try again.')

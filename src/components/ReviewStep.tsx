@@ -166,9 +166,11 @@ export function ReviewStep({
           <span className="text-slate-500">Mode: </span>
           {locationMode === 'mobile'
             ? 'Pickup — we’ll pick up your car'
-            : 'Drop-off — 504 Summit Ct, Jackson, MO'}
+            : locationMode === 'mobile-detailing'
+              ? 'Mobile detailing — we come to you'
+              : 'Drop-off — 504 Summit Ct, Jackson, MO'}
         </p>
-        {locationMode === 'mobile' && address ? (
+        {(locationMode === 'mobile' || locationMode === 'mobile-detailing') && address ? (
           <p className="mt-2 text-slate-400">
             <span className="text-slate-500">Address: </span>
             {address}

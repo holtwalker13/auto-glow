@@ -10,10 +10,7 @@ import {
 import { ContactStep } from './components/ContactStep'
 import { CustomerDataConsentModal } from './components/CustomerDataConsentModal'
 import { CustomerGateScreen } from './components/CustomerGateScreen'
-import {
-  ReturningCustomerLoyaltyScreen,
-  type LoyaltyLookupResult,
-} from './components/ReturningCustomerLoyaltyScreen'
+import { ReturningCustomerLoyaltyScreen } from './components/ReturningCustomerLoyaltyScreen'
 import { OrderSummaryBar } from './components/OrderSummaryBar'
 import { LogisticsStep } from './components/LogisticsStep'
 import { ReviewStep } from './components/ReviewStep'
@@ -40,7 +37,9 @@ import {
   persistCustomerConsent,
 } from './lib/customerConsentStorage'
 import { phoneDigitsOnly } from './lib/formatUsPhone'
+import { loyaltyLookupResultFromApi } from './lib/loyaltyLookupParse'
 import { firstNameFromFullName } from './lib/personName'
+import type { LoyaltyLookupResult } from './types/loyalty'
 import type {
   LocationMode,
   PreferredTimeSlot,
@@ -156,6 +155,9 @@ export default function BookingWizard() {
   const [returningShellFirstName, setReturningShellFirstName] = useState('')
   const [consentGateOpen, setConsentGateOpen] = useState(false)
   const [consentGateContext, setConsentGateContext] = useState<'new' | 'returning'>('new')
+  /** One-shot punch card data when a “new” customer’s phone matches job history. */
+  const [returningSeedLoyalty, setReturningSeedLoyalty] = useState<LoyaltyLookupResult | null>(null)
+  const [contactStepBusy, setContactStepBusy] = useState(false)
   const pendingReturningAfterConsent = useRef<{
     phone: string
     loyalty: LoyaltyLookupResult
@@ -225,7 +227,8 @@ export default function BookingWizard() {
 
   const scheduleOk = useMemo(() => {
     if (!preferredDate) return false
-    if (locationMode === 'mobile' && !address.trim()) return false
+    if ((locationMode === 'mobile' || locationMode === 'mobile-detailing') && !address.trim())
+      return false
     if (slotAvailability === null) return false
     const n = countFreeSlots(slotAvailability)
     if (hasCeramic) return n === 3
@@ -259,8 +262,8 @@ export default function BookingWizard() {
       if (!hasCeramic && n === 0)
         return 'No times available on this day — choose another date.'
       if (!hasCeramic && !preferredTimeSlot) return 'Choose a drop-off time (10 AM, 2 PM, or 4 PM).'
-      if (locationMode === 'mobile' && !address.trim())
-        return 'Add a pickup address where we should get your vehicle.'
+      if ((locationMode === 'mobile' || locationMode === 'mobile-detailing') && !address.trim())
+        return 'Add an address where we should meet your vehicle.'
       if (!hasCeramic && preferredTimeSlot && slotAvailability) {
         const a = slotAvailability[preferredTimeSlot]
         if (a?.status === 'block') return 'That time is unavailable — pick another slot.'
@@ -293,9 +296,46 @@ export default function BookingWizard() {
 
   const canProceed = validationError === null
 
+  async function maybeRedirectNewCustomerToReturningByPhone(): Promise<boolean> {
+    const d = phoneDigitsOnly(contact.phone)
+    if (d.length < 7) return false
+    try {
+      const res = await fetch('/api/loyalty/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: contact.phone }),
+      })
+      const raw = (await res.json().catch(() => ({}))) as Partial<LoyaltyLookupResult> & {
+        error?: string
+      }
+      if (!res.ok || !raw.recognized) return false
+      const merged = loyaltyLookupResultFromApi(raw)
+      setReturningShellFirstName(merged.firstName)
+      setReturningSeedLoyalty(merged)
+      setFlowPhase('returning')
+      requestAnimationFrame(() => setReturningSeedLoyalty(null))
+      return true
+    } catch {
+      return false
+    }
+  }
+
   function handleStepFormSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!canProceed) return
+    if (step === 0 && entryKind === 'new') {
+      if (contactStepBusy) return
+      setContactStepBusy(true)
+      void (async () => {
+        try {
+          const redirected = await maybeRedirectNewCustomerToReturningByPhone()
+          if (!redirected) goNext()
+        } finally {
+          setContactStepBusy(false)
+        }
+      })()
+      return
+    }
     goNext()
   }
 
@@ -348,6 +388,7 @@ export default function BookingWizard() {
         setFlowPhase('gate')
         setEntryKind(null)
         setLoyaltySnapshot(null)
+        setReturningSeedLoyalty(null)
         return
       }
       if (entryKind === 'returning') {
@@ -388,9 +429,12 @@ export default function BookingWizard() {
       locationMode,
       preferredDate,
       preferredTimeSlot: timeForPayload,
-      address: locationMode === 'mobile' ? address.trim() : undefined,
+      address:
+        locationMode === 'mobile' || locationMode === 'mobile-detailing' ? address.trim() : undefined,
       parkingNotes:
-        locationMode === 'mobile' && parkingNotes.trim() ? parkingNotes.trim() : undefined,
+        (locationMode === 'mobile' || locationMode === 'mobile-detailing') && parkingNotes.trim()
+          ? parkingNotes.trim()
+          : undefined,
     })
 
     setSubmitting(true)
@@ -424,6 +468,7 @@ export default function BookingWizard() {
     setEntryKind(null)
     setLoyaltySnapshot(null)
     setReturningShellFirstName('')
+    setReturningSeedLoyalty(null)
     setStep(0)
     setContact({ name: '', phone: '', email: '', notes: '' })
     setVehicleType('')
@@ -449,6 +494,7 @@ export default function BookingWizard() {
       phone: phone.trim(),
       name: loyalty.contactHint.name || c.name,
       email: loyalty.contactHint.email || c.email,
+      notes: (loyalty.contactHint.notes ?? '').trim() || c.notes,
     }))
     if (hintedVehicleType) setVehicleType(hintedVehicleType)
     if (hintedVehicleDescription) setVehicleDescription(hintedVehicleDescription)
@@ -529,6 +575,7 @@ export default function BookingWizard() {
               onNewCustomer={openConsentForNewCustomer}
               onReturningCustomer={() => {
                 setReturningShellFirstName('')
+                setReturningSeedLoyalty(null)
                 setFlowPhase('returning')
               }}
             />
@@ -549,8 +596,11 @@ export default function BookingWizard() {
             <ReturningCustomerLoyaltyScreen
               initialPhone={contact.phone}
               welcomeFirstNameHint={firstNameFromFullName(contact.name)}
+              initialLoyaltyFromLookup={returningSeedLoyalty}
               onBack={() => {
                 setReturningShellFirstName('')
+                setReturningSeedLoyalty(null)
+                setEntryKind(null)
                 setFlowPhase('gate')
               }}
               onWelcomeNameResolved={setReturningShellFirstName}
@@ -808,10 +858,10 @@ export default function BookingWizard() {
                 type={step === 0 ? 'submit' : 'button'}
                 form={step === 0 ? 'booking-step-contact' : undefined}
                 onClick={step === 0 ? undefined : goNext}
-                disabled={!canProceed}
+                disabled={!canProceed || contactStepBusy}
                 className="cta-gradient min-h-12 w-full rounded-xl text-sm font-semibold transition enabled:hover:brightness-110 enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 sm:flex-1"
               >
-                Continue
+                {contactStepBusy ? 'Checking your number…' : 'Continue'}
               </button>
             ) : (
               <button

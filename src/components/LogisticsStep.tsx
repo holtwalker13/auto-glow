@@ -119,7 +119,7 @@ export function LogisticsStep({
 
       <div>
         <p className="mb-3 text-sm font-medium text-slate-300">How should we meet?</p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <button
             type="button"
             onClick={() => onLocationModeChange('mobile')}
@@ -152,10 +152,26 @@ export function LogisticsStep({
               Please drop off 5min before appointment at 504 Summit Ct in Jackson, MO
             </span>
           </button>
+          <button
+            type="button"
+            onClick={() => onLocationModeChange('mobile-detailing')}
+            className={`rounded-2xl border px-4 py-4 text-left transition ${
+              locationMode === 'mobile-detailing'
+                ? 'border-cyan-400/50 bg-cyan-500/10'
+                : 'border-white/10 bg-white/[0.03] hover:border-white/20'
+            }`}
+          >
+            <span className="font-display text-base font-semibold italic text-white">
+              Mobile Detailing
+            </span>
+            <span className="mt-1 block text-sm text-slate-400">
+              We come to you - most flexible option.
+            </span>
+          </button>
         </div>
       </div>
 
-      {locationMode === 'mobile' ? (
+      {locationMode === 'mobile' || locationMode === 'mobile-detailing' ? (
         <div className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-300" htmlFor="addr">
@@ -168,7 +184,7 @@ export function LogisticsStep({
               value={address}
               onChange={(e) => onAddressChange(e.target.value)}
               autoComplete="street-address"
-              required={locationMode === 'mobile'}
+              required={locationMode === 'mobile' || locationMode === 'mobile-detailing'}
             />
           </div>
           <div>

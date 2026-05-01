@@ -1,6 +1,6 @@
 export type VehicleType = 'car' | 'truck' | 'minivan' | 'suv-compact' | 'suv-fullsize'
 
-export type LocationMode = 'mobile' | 'shop'
+export type LocationMode = 'mobile' | 'shop' | 'mobile-detailing'
 
 /** 24h values for API / payloads; UI shows AM/PM. */
 export type PreferredTimeSlot = '10:00' | '14:00' | '16:00'
